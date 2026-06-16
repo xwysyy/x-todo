@@ -38,6 +38,8 @@ void MainWindow::ClampScroll() {
 }
 
 void MainWindow::RebuildLayout() {
+    for (auto& r : rows_) // 释放上一轮缓存的删除线布局，避免泄漏
+        if (r.strikeLayout) { r.strikeLayout->Release(); r.strikeLayout = nullptr; }
     rows_.clear();
 
     RECT rc;
@@ -147,21 +149,10 @@ void MainWindow::StrokeRect(const D2D1_RECT_F& r, uint32_t rgb, float w, float a
 }
 
 void MainWindow::Text(const std::wstring& s, const D2D1_RECT_F& r, uint32_t rgb,
-                      IDWriteTextFormat* fmt, bool strike) {
+                      IDWriteTextFormat* fmt) {
     if (s.empty()) return;
     brush_->SetColor(Theme::Color(rgb));
-    if (!strike) {
-        rt_->DrawTextW(s.c_str(), (UINT32)s.size(), fmt, r, brush_);
-        return;
-    }
-    IDWriteTextLayout* layout = nullptr;
-    if (SUCCEEDED(dwrite_->CreateTextLayout(s.c_str(), (UINT32)s.size(), fmt,
-                                            r.right - r.left, r.bottom - r.top, &layout))) {
-        DWRITE_TEXT_RANGE rg{ 0, (UINT32)s.size() };
-        layout->SetStrikethrough(TRUE, rg);
-        rt_->DrawTextLayout(D2D1::Point2F(r.left, r.top), layout, brush_);
-        layout->Release();
-    }
+    rt_->DrawTextW(s.c_str(), (UINT32)s.size(), fmt, r, brush_);
 }
 
 void MainWindow::DrawCheckbox(const D2D1_RECT_F& box, bool checked) {
@@ -187,8 +178,25 @@ void MainWindow::DrawRow(const RowLayout& r, bool hovered) {
     DrawCheckbox(r.check, r.completed);
 
     if (!(editing() && editIndex_ == r.itemIndex)) {
-        uint32_t col = r.completed ? Theme::kTextDone : Theme::kText;
-        Text(model_.Items()[r.itemIndex].text, r.text, col, textFormat_, r.completed);
+        const std::wstring& s = model_.Items()[r.itemIndex].text;
+        if (r.completed) {
+            if (!r.strikeLayout && !s.empty()) { // 仅首帧创建带删除线的布局，之后复用
+                IDWriteTextLayout* layout = nullptr;
+                if (SUCCEEDED(dwrite_->CreateTextLayout(s.c_str(), (UINT32)s.size(), textFormat_,
+                                                        r.text.right - r.text.left,
+                                                        r.text.bottom - r.text.top, &layout))) {
+                    DWRITE_TEXT_RANGE rg{ 0, (UINT32)s.size() };
+                    layout->SetStrikethrough(TRUE, rg);
+                    r.strikeLayout = layout;
+                }
+            }
+            if (r.strikeLayout) {
+                brush_->SetColor(Theme::Color(Theme::kTextDone));
+                rt_->DrawTextLayout(D2D1::Point2F(r.text.left, r.text.top), r.strikeLayout, brush_);
+            }
+        } else {
+            Text(s, r.text, Theme::kText, textFormat_);
+        }
     }
 
     if (hovered) {

@@ -283,6 +283,7 @@ bool MainWindow::CreateDeviceResources() {
 }
 
 void MainWindow::DiscardDeviceResources() {
+    for (auto& r : rows_) SafeRelease(&r.strikeLayout); // 删除线布局随设备资源一并失效，下次绘制重建
     SafeRelease(&smallFormat_);
     SafeRelease(&textFormat_);
     SafeRelease(&brush_);
@@ -588,6 +589,7 @@ void MainWindow::HideToTray() {
         return;
     }
     ShowWindow(hwnd_, SW_HIDE);
+    DiscardDeviceResources(); // 收进托盘后释放 D2D 渲染资源，降低后台驻留内存；下次显示按需重建
 }
 
 void MainWindow::ExitApp() {

@@ -27,4 +27,5 @@ public:
 private:
     void Normalize(); // 稳定地把未完成项移到前段，维持不变量
     std::vector<TodoItem> items_;
+    int activeCount_ = 0; // 未完成数量（已完成段起始下标），随增删改维护，避免每次全量扫描
 };

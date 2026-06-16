@@ -45,6 +45,7 @@ private:
         D2D1_RECT_F text;
         D2D1_RECT_F del;
         D2D1_RECT_F handle;
+        mutable IDWriteTextLayout* strikeLayout = nullptr; // 完成项删除线布局，首帧创建后缓存
     };
     enum class HitKind { None, Check, Text, Delete, Handle, Section, Clear, Footer, Pin, Close, Menu };
     struct Hit { HitKind kind = HitKind::None; int rowIndex = -1; int itemIndex = -1; };
@@ -65,7 +66,7 @@ private:
     void FillRect(const D2D1_RECT_F& r, uint32_t rgb, float a = 1.0f);
     void StrokeRect(const D2D1_RECT_F& r, uint32_t rgb, float w, float a = 1.0f);
     void Text(const std::wstring& s, const D2D1_RECT_F& r, uint32_t rgb,
-              IDWriteTextFormat* fmt, bool strike = false);
+              IDWriteTextFormat* fmt);
 
     // —— 输入 ——
     void    OnLButtonDown(float x, float y);
