@@ -14,6 +14,60 @@ namespace {
 template <class T> void SafeRelease(T** p) {
     if (*p) { (*p)->Release(); *p = nullptr; }
 }
+
+int ClampInt(int value, int minValue, int maxValue) {
+    if (value < minValue) return minValue;
+    if (value > maxValue) return maxValue;
+    return value;
+}
+
+void CenterWindowOverOwner(HWND dialog, HWND owner) {
+    RECT dr{}, ownerRect{};
+    if (!GetWindowRect(dialog, &dr) || !GetWindowRect(owner, &ownerRect)) return;
+
+    int dw = dr.right - dr.left;
+    int dh = dr.bottom - dr.top;
+    int x = ownerRect.left + ((ownerRect.right - ownerRect.left) - dw) / 2;
+    int y = ownerRect.top + ((ownerRect.bottom - ownerRect.top) - dh) / 2;
+
+    HMONITOR monitor = MonitorFromWindow(owner, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi{ sizeof(mi) };
+    if (monitor && GetMonitorInfoW(monitor, &mi)) {
+        x = ClampInt(x, mi.rcWork.left, mi.rcWork.right - dw);
+        y = ClampInt(y, mi.rcWork.top, mi.rcWork.bottom - dh);
+    }
+    SetWindowPos(dialog, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+struct MessageBoxCentering {
+    HWND owner = nullptr;
+    HHOOK hook = nullptr;
+};
+
+thread_local MessageBoxCentering* g_messageBoxCentering = nullptr;
+
+LRESULT CALLBACK CenterMessageBoxHook(int code, WPARAM wp, LPARAM lp) {
+    if (code == HCBT_ACTIVATE && g_messageBoxCentering && g_messageBoxCentering->owner) {
+        CenterWindowOverOwner(reinterpret_cast<HWND>(wp), g_messageBoxCentering->owner);
+        if (g_messageBoxCentering->hook) {
+            UnhookWindowsHookEx(g_messageBoxCentering->hook);
+            g_messageBoxCentering->hook = nullptr;
+        }
+        return 0;
+    }
+    return CallNextHookEx(g_messageBoxCentering ? g_messageBoxCentering->hook : nullptr, code, wp, lp);
+}
+
+int CenteredMessageBox(HWND owner, const wchar_t* text, const wchar_t* caption, UINT flags) {
+    MessageBoxCentering centering{ owner, nullptr };
+    MessageBoxCentering* previous = g_messageBoxCentering;
+    g_messageBoxCentering = &centering;
+    centering.hook = SetWindowsHookExW(WH_CBT, CenterMessageBoxHook, nullptr, GetCurrentThreadId());
+    int result = MessageBoxW(owner, text, caption, flags);
+    if (centering.hook) UnhookWindowsHookEx(centering.hook);
+    g_messageBoxCentering = previous;
+    return result;
+}
 } // namespace
 
 // ——————————————————————————— 生命周期 ———————————————————————————
@@ -450,7 +504,7 @@ void MainWindow::SetLanguage(Lang lang) {
 void MainWindow::SetMountMode(MountMode m) {
     if (m == mountMode_) return;
     if (editing()) CommitEdit(false);
-    if (mountMode_ == MountMode::Normal) CaptureGeometry(); // 切走前固化当前几何，避免丢失
+    if (!capsuleShrunk()) CaptureVisibleGeometry();
     mountMode_ = m;
     ui_.mountMode = (m == MountMode::Desktop) ? "desktop"
                   : (m == MountMode::Capsule) ? "capsule" : "normal";
@@ -468,9 +522,10 @@ void MainWindow::ApplyMountMode() {
         SetWindowPos(hwnd_, HWND_BOTTOM, geom_.x, geom_.y, geom_.w, geom_.h,
                      SWP_NOACTIVATE | SWP_SHOWWINDOW);
     } else if (mountMode_ == MountMode::Capsule) {
-        RECT c = CapsuleTargetRect();
-        SetWindowPos(hwnd_, HWND_TOPMOST, c.left, c.top,
-                     c.right - c.left, c.bottom - c.top,
+        RECT e = ExpandedTargetRect();
+        capsuleExpanded_ = true;
+        SetWindowPos(hwnd_, HWND_TOPMOST, e.left, e.top,
+                     e.right - e.left, e.bottom - e.top,
                      SWP_NOACTIVATE | SWP_SHOWWINDOW);
     } else { // Normal
         SetWindowPos(hwnd_, ui_.alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
@@ -500,6 +555,19 @@ RECT MainWindow::ExpandedTargetRect() const {
     if (y < wa.top) y = wa.top;
     if (y + h > wa.bottom) y = wa.bottom - h;
     return RECT{ x, y, x + w, y + h };
+}
+
+void MainWindow::CaptureVisibleGeometry() {
+    RECT rc;
+    if (!GetWindowRect(hwnd_, &rc)) return;
+    int w = rc.right - rc.left;
+    int h = rc.bottom - rc.top;
+    if (w < (int)S(220) || h < (int)S(160)) return;
+    geom_.x = rc.left;
+    geom_.y = rc.top;
+    geom_.w = w;
+    geom_.h = h;
+    geom_.valid = true;
 }
 
 void MainWindow::StartCapsuleAnim(bool expand) {
@@ -556,6 +624,11 @@ void MainWindow::ToggleAutostart() {
     Autostart::SetEnabled(!Autostart::IsEnabled());
 }
 
+bool MainWindow::Confirm(Str message, UINT icon) {
+    return CenteredMessageBox(hwnd_, T(message, lang_), L"X-TODO",
+                              MB_OKCANCEL | icon) == IDOK;
+}
+
 void MainWindow::DeleteItem(int itemIndex) {
     if (editing() && editIndex_ == itemIndex) CancelEdit();
     model_.Remove(itemIndex);
@@ -567,9 +640,7 @@ void MainWindow::DeleteItem(int itemIndex) {
 
 void MainWindow::ClearCompletedConfirm() {
     if (model_.CompletedCount() == 0) return;
-    int r = MessageBoxW(hwnd_, T(Str::ClearAllMsg, lang_),
-                        L"X-TODO", MB_OKCANCEL | MB_ICONWARNING);
-    if (r != IDOK) return;
+    if (!Confirm(Str::ClearAllMsg, MB_ICONWARNING)) return;
     model_.ClearCompleted();
     RebuildLayout();
     ClampScroll();

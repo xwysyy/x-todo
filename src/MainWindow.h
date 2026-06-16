@@ -102,11 +102,13 @@ private:
     void        MaybeCollapseCapsule(); // 编辑结束后若鼠标已在窗口外则收回胶囊
     RECT        CapsuleTargetRect() const;  // 折叠贴边矩形（屏幕坐标）
     RECT        ExpandedTargetRect() const; // 胶囊展开后的矩形（屏幕坐标）
+    void        CaptureVisibleGeometry();
     bool        capsuleShrunk() const {
         return mountMode_ == MountMode::Capsule && !capsuleExpanded_ && !animActive_;
     }
 
     // —— 行为 ——
+    bool Confirm(Str message, UINT icon);
     void ApplyTopmost();
     void TogglePin();
     void ToggleCompletedExpanded();

@@ -392,8 +392,7 @@ void MainWindow::OnLButtonUp(float x, float y) {
         BeginEdit(h.itemIndex);
         break;
     case HitKind::Delete:
-        if (MessageBoxW(hwnd_, T(Str::DeleteItemMsg, lang_), L"X-TODO",
-                        MB_OKCANCEL | MB_ICONQUESTION) == IDOK)
+        if (Confirm(Str::DeleteItemMsg, MB_ICONQUESTION))
             DeleteItem(h.itemIndex);
         break;
     case HitKind::Section: ToggleCompletedExpanded(); break;
@@ -497,6 +496,7 @@ void MainWindow::BeginEdit(int itemIndex) {
     wcscpy_s(lf.lfFaceName, Theme::kFontFamily);
     editFont_ = CreateFontIndirectW(&lf);
     SendMessageW(edit_, WM_SETFONT, (WPARAM)editFont_, TRUE);
+    SendMessageW(edit_, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, 0);
 
     SetWindowTextW(edit_, model_.Items()[itemIndex].text.c_str());
     LayoutEditBox();
@@ -569,10 +569,24 @@ void MainWindow::LayoutEditBox() {
     float off = ContentTop() - scroll_;
     for (const RowLayout& r : rows_) {
         if (r.itemIndex == editIndex_ && !r.completed) {
+            int rowTop = (int)(r.row.top + off);
+            int rowH = (int)(r.row.bottom - r.row.top);
+            int h = (int)S(24);
+            if (editFont_) {
+                HDC hdc = GetDC(edit_);
+                if (hdc) {
+                    HFONT oldFont = (HFONT)SelectObject(hdc, editFont_);
+                    TEXTMETRICW tm{};
+                    if (GetTextMetricsW(hdc, &tm))
+                        h = tm.tmHeight + tm.tmExternalLeading + (int)S(4);
+                    SelectObject(hdc, oldFont);
+                    ReleaseDC(edit_, hdc);
+                }
+            }
+            if (h > rowH) h = rowH;
             int left = (int)r.text.left;
-            int top  = (int)(r.row.top + off + S(4));
+            int top  = rowTop + (rowH - h) / 2;
             int w    = (int)(r.text.right - r.text.left);
-            int h    = (int)(r.row.bottom - r.row.top - S(8));
             MoveWindow(edit_, left, top, w, h, TRUE);
             return;
         }
