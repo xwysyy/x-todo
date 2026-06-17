@@ -21,7 +21,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Configure (MSVC, x64)
         run: cmake -B build -A x64
@@ -49,7 +49,7 @@ jobs:
           $badge | ConvertTo-Json -Compress | Set-Content -NoNewline -Encoding utf8 "build/MinSizeRel/size-badge.json"
 
       - name: Upload exe
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: x-todo
           path: |
@@ -65,12 +65,12 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Download exe
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: x-todo
           path: dist
