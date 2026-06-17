@@ -2,3 +2,6 @@
 
 // 把 app.manifest 作为 RT_MANIFEST 资源嵌入（配合链接器 /MANIFEST:NO）
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "app.manifest"
+
+// 应用图标（X 立方体，多尺寸 16-256）。ID=1 取最小值，成为 exe 默认图标
+1 ICON "app.ico"
