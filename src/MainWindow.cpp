@@ -14,8 +14,20 @@
 #endif
 
 namespace {
+constexpr int kAppIconResourceId = 1; // resources/resource.rc embeds app.ico with ID 1.
+
 template <class T> void SafeRelease(T** p) {
     if (*p) { (*p)->Release(); *p = nullptr; }
+}
+
+HICON LoadSharedAppIcon(int cx, int cy) {
+    return (HICON)LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(kAppIconResourceId),
+                             IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR | LR_SHARED);
+}
+
+HICON LoadOwnedAppIcon(int cx, int cy) {
+    return (HICON)LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(kAppIconResourceId),
+                             IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR);
 }
 
 // 显示器 szDevice（宽字符）转 UTF-8（size-then-resize，无越界）
@@ -92,6 +104,8 @@ bool MainWindow::RegisterWindowClass() {
     wc.lpfnWndProc   = WndProcStatic;
     wc.hInstance     = GetModuleHandleW(nullptr);
     wc.hCursor       = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hIcon         = LoadSharedAppIcon(GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON));
+    wc.hIconSm       = LoadSharedAppIcon(GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));
     wc.hbrBackground = nullptr; // 全程 Direct2D 绘制
     wc.lpszClassName = kWindowClass;
     return RegisterClassExW(&wc) != 0;
@@ -126,6 +140,10 @@ bool MainWindow::Create() {
         WS_EX_TOOLWINDOW, kWindowClass, L"x-todo", WS_POPUP | WS_CLIPCHILDREN,
         x, y, w, h, nullptr, nullptr, GetModuleHandleW(nullptr), this);
     if (!hwnd_) return false;
+    SendMessageW(hwnd_, WM_SETICON, ICON_BIG,
+                 (LPARAM)LoadSharedAppIcon(GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON)));
+    SendMessageW(hwnd_, WM_SETICON, ICON_SMALL,
+                 (LPARAM)LoadSharedAppIcon(GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON)));
 
     dpi_ = GetDpiForWindow(hwnd_);
     geom_ = { x, y, w, h, true }; // 回写校验后的几何，供形态切换/保存复用
@@ -207,6 +225,16 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_EXITSIZEMOVE:
+        CaptureVisibleGeometry();
+        if (mountMode_ == MountMode::Capsule && capsuleExpanded_ && !animActive_) {
+            RECT target = ExpandedTargetRect();
+            SetWindowPos(hwnd_, HWND_TOPMOST, target.left, target.top,
+                         target.right - target.left, target.bottom - target.top,
+                         SWP_NOACTIVATE);
+            UpdateLayeredState();
+            RebuildLayout();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        }
         ScheduleSave(); // 移动 / 缩放结束后持久化窗口几何
         return 0;
 
@@ -410,58 +438,11 @@ void MainWindow::Resize(UINT w, UINT h) {
 // ——————————————————————————— 托盘 ———————————————————————————
 
 HICON MainWindow::CreateTrayIconHandle() {
-    const int sz = 32;
-    HDC screen = GetDC(nullptr);
-    HDC dc = CreateCompatibleDC(screen);
-
-    BITMAPINFO bi{};
-    bi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
-    bi.bmiHeader.biWidth       = sz;
-    bi.bmiHeader.biHeight      = -sz; // 自上而下
-    bi.bmiHeader.biPlanes      = 1;
-    bi.bmiHeader.biBitCount    = 32;
-    bi.bmiHeader.biCompression = BI_RGB;
-    void* bits = nullptr;
-    HBITMAP color = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
-    HBITMAP oldColor = (HBITMAP)SelectObject(dc, color);
-
-    RECT full{ 0, 0, sz, sz };
-    HBRUSH paper = CreateSolidBrush(RGB(0xFB, 0xF7, 0xEC));
-    ::FillRect(dc, &full, paper); // 显式 GDI 版（避免与成员 FillRect 撞名）
-    DeleteObject(paper);
-
-    HPEN pen = CreatePen(PS_SOLID, 3, RGB(0x5F, 0x7A, 0x4F)); // 对勾
-    HGDIOBJ oldPen = SelectObject(dc, pen);
-    MoveToEx(dc, 9, 17, nullptr);
-    LineTo(dc, 14, 22);
-    LineTo(dc, 23, 11);
-    SelectObject(dc, oldPen);
-    DeleteObject(pen);
-
-    SelectObject(dc, oldColor);
-
-    // 单色掩码：圆角矩形区域不透明，其余透明
-    HBITMAP mask = CreateBitmap(sz, sz, 1, 1, nullptr);
-    HDC mdc = CreateCompatibleDC(screen);
-    HBITMAP oldMask = (HBITMAP)SelectObject(mdc, mask);
-    PatBlt(mdc, 0, 0, sz, sz, WHITENESS); // 全 1 = 透明
-    SelectObject(mdc, GetStockObject(BLACK_BRUSH));
-    SelectObject(mdc, GetStockObject(BLACK_PEN));
-    RoundRect(mdc, 3, 3, sz - 3, sz - 3, 9, 9); // 置 0 = 不透明
-    SelectObject(mdc, oldMask);
-    DeleteDC(mdc);
-
-    ICONINFO ii{};
-    ii.fIcon    = TRUE;
-    ii.hbmColor = color;
-    ii.hbmMask  = mask;
-    HICON icon = CreateIconIndirect(&ii);
-
-    DeleteObject(color);
-    DeleteObject(mask);
-    DeleteDC(dc);
-    ReleaseDC(nullptr, screen);
-    return icon;
+    int cx = GetSystemMetrics(SM_CXSMICON);
+    int cy = GetSystemMetrics(SM_CYSMICON);
+    if (cx <= 0) cx = 32;
+    if (cy <= 0) cy = 32;
+    return LoadOwnedAppIcon(cx, cy);
 }
 
 bool MainWindow::AddTrayIcon() {
@@ -680,6 +661,27 @@ bool MainWindow::DockMonitorInfo(MONITORINFOEXW& mi) const {
     return mon && GetMonitorInfoW(mon, (MONITORINFO*)&mi);
 }
 
+void MainWindow::CaptureCapsuleDockFromRect(const RECT& wr) {
+    POINT center{ (wr.left + wr.right) / 2, (wr.top + wr.bottom) / 2 };
+    HMONITOR mon = MonitorFromPoint(center, MONITOR_DEFAULTTONEAREST);
+    MONITORINFOEXW mi{};
+    mi.cbSize = sizeof(mi);
+    if (!mon || !GetMonitorInfoW(mon, (MONITORINFO*)&mi)) return;
+
+    RECT wa = mi.rcWork;
+    int distLeft = center.x - wa.left;
+    int distRight = wa.right - center.x;
+    DockEdge edge = (distLeft <= distRight) ? DockEdge::Left : DockEdge::Right;
+    int workH = wa.bottom - wa.top;
+    double t = workH > 0 ? (double)(center.y - wa.top) / workH : 0.5;
+    if (t < 0.0) t = 0.0;
+    if (t > 1.0) t = 1.0;
+
+    ui_.capsuleDockEdge = (edge == DockEdge::Left) ? "left" : "right";
+    ui_.capsuleDockT = t;
+    ui_.capsuleMonitor = MonitorDeviceUtf8(mi.szDevice);
+}
+
 void MainWindow::SetCapsuleStyle(CapsuleStyle s) {
     if (s == capsuleStyle_) return;
     capsuleStyle_ = s;
@@ -804,22 +806,7 @@ void MainWindow::CancelCapsulePress() {
 void MainWindow::SnapCapsuleToNearestEdge() {
     RECT wr{};
     if (!GetWindowRect(hwnd_, &wr)) return;
-    POINT center{ (wr.left + wr.right) / 2, (wr.top + wr.bottom) / 2 };
-    HMONITOR mon = MonitorFromPoint(center, MONITOR_DEFAULTTONEAREST);
-    MONITORINFOEXW mi{};
-    mi.cbSize = sizeof(mi);
-    if (!mon || !GetMonitorInfoW(mon, (MONITORINFO*)&mi)) return;
-    RECT wa = mi.rcWork;
-    int distLeft = center.x - wa.left;
-    int distRight = wa.right - center.x;
-    DockEdge edge = (distLeft <= distRight) ? DockEdge::Left : DockEdge::Right;
-    int workH = wa.bottom - wa.top;
-    double t = workH > 0 ? (double)(center.y - wa.top) / workH : 0.5;
-    if (t < 0.0) t = 0.0;
-    if (t > 1.0) t = 1.0;
-    ui_.capsuleDockEdge = (edge == DockEdge::Left) ? "left" : "right";
-    ui_.capsuleDockT = t;
-    ui_.capsuleMonitor = MonitorDeviceUtf8(mi.szDevice);
+    CaptureCapsuleDockFromRect(wr);
     RECT target = CapsuleTargetRect();
     SetWindowPos(hwnd_, HWND_TOPMOST, target.left, target.top,
                  target.right - target.left, target.bottom - target.top, SWP_NOACTIVATE);
@@ -830,14 +817,19 @@ void MainWindow::SnapCapsuleToNearestEdge() {
 }
 
 void MainWindow::CaptureVisibleGeometry() {
-    if (mountMode_ != MountMode::Normal) return; // (R1-F003) 非普通态不写回 geom_
     RECT rc;
     if (!GetWindowRect(hwnd_, &rc)) return;
     int w = rc.right - rc.left;
     int h = rc.bottom - rc.top;
     if (w < (int)S(220) || h < (int)S(160)) return;
-    geom_.x = rc.left;
-    geom_.y = rc.top;
+
+    if (mountMode_ == MountMode::Capsule) {
+        if (!capsuleExpanded_ || animActive_) return;
+        CaptureCapsuleDockFromRect(rc);
+    } else {
+        geom_.x = rc.left;
+        geom_.y = rc.top;
+    }
     geom_.w = w;
     geom_.h = h;
     geom_.valid = true;
@@ -969,13 +961,20 @@ void MainWindow::SaveNow() {
 }
 
 void MainWindow::CaptureGeometry() {
-    if (mountMode_ != MountMode::Normal) return; // 仅普通形态写回，胶囊/桌面尺寸不污染几何
     RECT rc;
-    if (GetWindowRect(hwnd_, &rc)) {
+    if (!GetWindowRect(hwnd_, &rc)) return;
+    int w = rc.right - rc.left;
+    int h = rc.bottom - rc.top;
+    if (w < (int)S(220) || h < (int)S(160)) return;
+
+    if (mountMode_ == MountMode::Capsule) {
+        if (!capsuleExpanded_ || animActive_) return;
+        CaptureCapsuleDockFromRect(rc);
+    } else {
         geom_.x = rc.left;
         geom_.y = rc.top;
-        geom_.w = rc.right - rc.left;
-        geom_.h = rc.bottom - rc.top;
-        geom_.valid = true;
     }
+    geom_.w = w;
+    geom_.h = h;
+    geom_.valid = true;
 }

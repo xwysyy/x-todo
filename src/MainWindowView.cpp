@@ -479,7 +479,8 @@ void MainWindow::OnMouseWheel(int delta) {
 }
 
 LRESULT MainWindow::OnNcHitTest(int sx, int sy) {
-    if (mountMode_ != MountMode::Normal) return HTCLIENT; // 仅普通形态可拖动/缩放窗口
+    if (mountMode_ == MountMode::Capsule && (capsuleShrunk() || animActive_))
+        return HTCLIENT; // 折叠 / 动画中的胶囊保持固定形状，不进入系统缩放
     POINT p{ sx, sy };
     ScreenToClient(hwnd_, &p);
     RECT rc;
@@ -498,6 +499,7 @@ LRESULT MainWindow::OnNcHitTest(int sx, int sy) {
     if (p.y < S(Theme::kTitleH)) {
         D2D1_POINT_2F pt{ (float)p.x, (float)p.y };
         if (InRect(menuRect_, pt) || InRect(pinRect_, pt) || InRect(closeRect_, pt)) return HTCLIENT;
+        if (mountMode_ == MountMode::Capsule) return HTCLIENT;
         return HTCAPTION;
     }
     return HTCLIENT;

@@ -29,11 +29,32 @@ jobs:
       - name: Build (MinSizeRel)
         run: cmake --build build --config MinSizeRel
 
+      - name: Generate size badge endpoint
+        shell: pwsh
+        run: |
+          $exe = "build/MinSizeRel/x-todo.exe"
+          $size = (Get-Item $exe).Length
+          $culture = [System.Globalization.CultureInfo]::InvariantCulture
+          if ($size -ge 1MB) {
+            $message = [string]::Format($culture, "{0:0.#} MiB", $size / 1MB)
+          } else {
+            $message = [string]::Format($culture, "{0:0.#} KiB", $size / 1KB)
+          }
+          $badge = [ordered]@{
+            schemaVersion = 1
+            label = "exe"
+            message = $message
+            color = "2EA043"
+          }
+          $badge | ConvertTo-Json -Compress | Set-Content -NoNewline -Encoding utf8 "build/MinSizeRel/size-badge.json"
+
       - name: Upload exe
         uses: actions/upload-artifact@v4
         with:
           name: x-todo
-          path: build/MinSizeRel/x-todo.exe
+          path: |
+            build/MinSizeRel/x-todo.exe
+            build/MinSizeRel/size-badge.json
           if-no-files-found: error
 
   release:
@@ -44,6 +65,10 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download exe
         uses: actions/download-artifact@v4
         with:
@@ -51,6 +76,30 @@ jobs:
           path: dist
 
       - name: Publish GitHub Release
-        run: gh release create "$GITHUB_REF_NAME" "dist/x-todo.exe#x-todo.exe" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/x-todo.exe#x-todo.exe" \
+            "dist/size-badge.json#size-badge.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish size badge endpoint
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin badges || true
+          if git show-ref --verify --quiet refs/remotes/origin/badges; then
+            git switch --force-create badges origin/badges
+          else
+            git switch --force-create badges
+          fi
+          cp dist/size-badge.json size-badge.json
+          git add size-badge.json
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Update size badge for $GITHUB_REF_NAME"
+          git push origin badges

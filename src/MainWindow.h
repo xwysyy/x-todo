@@ -124,6 +124,7 @@ private:
     double      CapsuleDockT() const;
     bool        DockMonitorInfo(MONITORINFOEXW& mi) const;
     HMONITOR    FindMonitorByDevice(const std::string& device) const;
+    void        CaptureCapsuleDockFromRect(const RECT& wr);
     void        UpdateLayeredState();  // 按样式 / 折叠 / hover 维护 WS_EX_LAYERED 整窗 alpha
     void        UpdateCapsuleRegion(); // 折叠态（Slim 圆角矩形 / Dot 椭圆）用 window region 定形并关 DWM 圆角 / 边框
 
