@@ -15,6 +15,16 @@ template <class T> void SafeRelease(T** p) {
     if (*p) { (*p)->Release(); *p = nullptr; }
 }
 
+// 显示器 szDevice（宽字符）转 UTF-8（size-then-resize，无越界）
+std::string MonitorDeviceUtf8(const wchar_t* szDevice) {
+    int n = WideCharToMultiByte(CP_UTF8, 0, szDevice, -1, nullptr, 0, nullptr, nullptr);
+    if (n <= 0) return std::string();
+    std::string dev((size_t)n, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, szDevice, -1, dev.data(), n, nullptr, nullptr);
+    dev.resize((size_t)n - 1);
+    return dev;
+}
+
 int ClampInt(int value, int minValue, int maxValue) {
     if (value < minValue) return minValue;
     if (value > maxValue) return maxValue;
@@ -127,6 +137,7 @@ bool MainWindow::Create() {
     lang_ = ui_.lang == "zh" ? Lang::Zh
           : ui_.lang == "en" ? Lang::En
           : SystemDefaultLang();
+    capsuleStyle_ = ui_.capsuleStyle == "dot" ? CapsuleStyle::Dot : CapsuleStyle::Slim;
     mountMode_ = ui_.mountMode == "desktop" ? MountMode::Desktop
                : ui_.mountMode == "capsule" ? MountMode::Capsule
                : MountMode::Normal;
@@ -137,10 +148,10 @@ bool MainWindow::Create() {
     return true;
 }
 
-void MainWindow::Show() {
+void MainWindow::Show(bool expandCapsule) {
     ShowWindow(hwnd_, SW_SHOW);
-    if (mountMode_ == MountMode::Capsule && !capsuleExpanded_ && !animActive_)
-        StartCapsuleAnim(true); // 胶囊形态被叫回时滑出
+    if (expandCapsule && mountMode_ == MountMode::Capsule && !capsuleExpanded_ && !animActive_)
+        StartCapsuleAnim(true); // 主动唤起（托盘 / 菜单 / 第二实例）时滑出
     SetForegroundWindow(hwnd_);
 }
 
@@ -174,6 +185,17 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_DISPLAYCHANGE:
+        if (mountMode_ == MountMode::Capsule && !capsuleDragging_) {
+            MONITORINFOEXW mi{};
+            if (DockMonitorInfo(mi)) { // 原显示器可能失效已回退，持久化实际所在
+                std::string dev = MonitorDeviceUtf8(mi.szDevice);
+                if (!dev.empty() && dev != ui_.capsuleMonitor) { ui_.capsuleMonitor = dev; ScheduleSave(); }
+            }
+            RECT t = capsuleExpanded_ ? ExpandedTargetRect() : CapsuleTargetRect();
+            SetWindowPos(hwnd_, HWND_TOPMOST, t.left, t.top,
+                         t.right - t.left, t.bottom - t.top, SWP_NOACTIVATE);
+            UpdateLayeredState(); // 顺带刷新 alpha 与圆点区域
+        }
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
 
@@ -187,12 +209,29 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_DPICHANGED: {
         dpi_ = HIWORD(wp);
-        RECT* prc = reinterpret_cast<RECT*>(lp);
-        SetWindowPos(hwnd_, nullptr, prc->left, prc->top,
-                     prc->right - prc->left, prc->bottom - prc->top,
+        RECT target{};
+        if (mountMode_ == MountMode::Capsule && !capsuleDragging_) {
+            target = capsuleExpanded_ ? ExpandedTargetRect() : CapsuleTargetRect();
+        } else {
+            RECT* prc = reinterpret_cast<RECT*>(lp);
+            target = *prc;
+        }
+        SetWindowPos(hwnd_, nullptr, target.left, target.top,
+                     target.right - target.left, target.bottom - target.top,
                      SWP_NOZORDER | SWP_NOACTIVATE);
         DiscardDeviceResources(); // 下次绘制按新 DPI 重建文本格式
         RebuildLayout();
+        if (editing()) { // 编辑中：按新 DPI 重建编辑字体并重定位
+            if (editFont_) { DeleteObject(editFont_); editFont_ = nullptr; }
+            LOGFONTW lf{};
+            lf.lfHeight  = -(LONG)S(Theme::kFontSize);
+            lf.lfQuality = CLEARTYPE_QUALITY;
+            wcscpy_s(lf.lfFaceName, Theme::kFontFamily);
+            editFont_ = CreateFontIndirectW(&lf);
+            SendMessageW(edit_, WM_SETFONT, (WPARAM)editFont_, TRUE);
+            LayoutEditBox();
+        }
+        UpdateLayeredState();
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
     }
@@ -203,16 +242,17 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_LBUTTONUP:
-        ReleaseCapture();
         OnLButtonUp((float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp));
+        if (GetCapture() == hwnd_) ReleaseCapture(); // 先处理逻辑松手再释放，避免自触发 WM_CAPTURECHANGED 误清状态
         return 0;
 
     case WM_MOUSEMOVE: {
         TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd_, 0 };
         TrackMouseEvent(&tme);
-        if (mountMode_ == MountMode::Capsule && !capsuleExpanded_ && !animActive_) {
-            StartCapsuleAnim(true); // 折叠胶囊：鼠标移入即滑出
-            return 0;
+        if (capsuleShrunk() && !capsulePressing_ && !capsuleHover_) {
+            capsuleHover_ = true; // 折叠胶囊：鼠标进入仅视觉提示，不展开
+            UpdateLayeredState();
+            InvalidateRect(hwnd_, nullptr, FALSE);
         }
         OnMouseMove((float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp), (wp & MK_LBUTTON) != 0);
         return 0;
@@ -220,12 +260,24 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_MOUSELEAVE:
         OnMouseLeave();
+        if (capsuleHover_) { // 折叠胶囊：离开则取消视觉提示
+            capsuleHover_ = false;
+            UpdateLayeredState();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        }
         if (mountMode_ == MountMode::Capsule && capsuleExpanded_ && !animActive_ && !editing())
             StartCapsuleAnim(false); // 鼠标离开展开的便签：滑回胶囊
         return 0;
 
     case WM_MOUSEWHEEL:
         OnMouseWheel(GET_WHEEL_DELTA_WPARAM(wp));
+        return 0;
+
+    case WM_CAPTURECHANGED: // capture 被夺：收尾未完成的胶囊按压 / 行拖动
+        if ((HWND)lp != hwnd_) {
+            if (capsulePressing_) CancelCapsulePress();
+            if (dragging_) { dragging_ = false; dragFrom_ = dragInsert_ = -1; InvalidateRect(hwnd_, nullptr, FALSE); }
+        }
         return 0;
 
     case WM_NCHITTEST:
@@ -441,7 +493,14 @@ void MainWindow::RemoveTrayIcon() {
 void MainWindow::AppendMenuItems(HMENU menu) {
     AppendMenuW(menu, MF_STRING | (mountMode_ == MountMode::Normal  ? MF_CHECKED : 0), 10, T(Str::ModeNormal, lang_));
     AppendMenuW(menu, MF_STRING | (mountMode_ == MountMode::Desktop ? MF_CHECKED : 0), 11, T(Str::ModeDesktop, lang_));
-    AppendMenuW(menu, MF_STRING | (mountMode_ == MountMode::Capsule ? MF_CHECKED : 0), 12, T(Str::ModeCapsule, lang_));
+
+    // 侧边胶囊：子菜单选外观样式；选任一即进入胶囊模式并设样式
+    HMENU styleMenu = CreatePopupMenu();
+    const bool inCapsule = (mountMode_ == MountMode::Capsule);
+    AppendMenuW(styleMenu, MF_STRING | (inCapsule && capsuleStyle_ == CapsuleStyle::Slim ? MF_CHECKED : 0), 30, T(Str::StyleSlim, lang_));
+    AppendMenuW(styleMenu, MF_STRING | (inCapsule && capsuleStyle_ == CapsuleStyle::Dot  ? MF_CHECKED : 0), 31, T(Str::StyleDot, lang_));
+    AppendMenuW(menu, MF_POPUP | (inCapsule ? MF_CHECKED : 0), (UINT_PTR)styleMenu, T(Str::ModeCapsule, lang_));
+
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, 20, T(Str::ToggleLang, lang_));
     AppendMenuW(menu, MF_STRING | (Autostart::IsEnabled() ? MF_CHECKED : 0), 2, T(Str::Autostart, lang_));
@@ -454,7 +513,10 @@ void MainWindow::HandleMenuCommand(UINT cmd) {
         case 3:  ExitApp();                           break;
         case 10: SetMountMode(MountMode::Normal);     break;
         case 11: SetMountMode(MountMode::Desktop);    break;
-        case 12: SetMountMode(MountMode::Capsule);    break;
+        case 30: SetCapsuleStyle(CapsuleStyle::Slim);
+                 if (mountMode_ != MountMode::Capsule) SetMountMode(MountMode::Capsule); break;
+        case 31: SetCapsuleStyle(CapsuleStyle::Dot);
+                 if (mountMode_ != MountMode::Capsule) SetMountMode(MountMode::Capsule); break;
         case 20: SetLanguage(lang_ == Lang::Zh ? Lang::En : Lang::Zh); break;
         default: break;
     }
@@ -522,42 +584,210 @@ void MainWindow::ApplyMountMode() {
         SetWindowPos(hwnd_, HWND_BOTTOM, geom_.x, geom_.y, geom_.w, geom_.h,
                      SWP_NOACTIVATE | SWP_SHOWWINDOW);
     } else if (mountMode_ == MountMode::Capsule) {
-        RECT e = ExpandedTargetRect();
-        capsuleExpanded_ = true;
-        SetWindowPos(hwnd_, HWND_TOPMOST, e.left, e.top,
-                     e.right - e.left, e.bottom - e.top,
+        capsuleExpanded_ = false; // 进入胶囊即折叠（冷启动 / 切换都收起）
+        RECT c = CapsuleTargetRect();
+        SetWindowPos(hwnd_, HWND_TOPMOST, c.left, c.top,
+                     c.right - c.left, c.bottom - c.top,
                      SWP_NOACTIVATE | SWP_SHOWWINDOW);
     } else { // Normal
         SetWindowPos(hwnd_, ui_.alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
                      geom_.x, geom_.y, geom_.w, geom_.h,
                      SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
+    UpdateLayeredState();
     RebuildLayout();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 RECT MainWindow::CapsuleTargetRect() const {
+    MONITORINFOEXW mi{};
     RECT wa{};
-    SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
-    int cw = (int)S(18), ch = (int)S(74);
-    int x = wa.right - cw;                       // 贴右缘
-    int y = (wa.top + wa.bottom) / 2 - ch / 2;   // 垂直居中
+    if (DockMonitorInfo(mi)) wa = mi.rcWork;
+    else SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+
+    int cw = (int)S(capsuleStyle_ == CapsuleStyle::Dot ? Theme::kCapsuleDot : Theme::kCapsuleSlimW);
+    int ch = (int)S(capsuleStyle_ == CapsuleStyle::Dot ? Theme::kCapsuleDot : Theme::kCapsuleSlimH);
+    int workW = wa.right - wa.left, workH = wa.bottom - wa.top;
+    if (workW > 0 && cw > workW) cw = workW; // 防胶囊大于工作区致 ClampInt 边界反转
+    if (workH > 0 && ch > workH) ch = workH;
+    int centerY = wa.top + (int)(CapsuleDockT() * workH + 0.5);
+    int y = ClampInt(centerY - ch / 2, wa.top, wa.bottom - ch);
+    int x = (CapsuleDockEdge() == DockEdge::Left) ? wa.left : wa.right - cw;
     return RECT{ x, y, x + cw, y + ch };
 }
 
 RECT MainWindow::ExpandedTargetRect() const {
+    MONITORINFOEXW mi{};
     RECT wa{};
-    SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+    if (DockMonitorInfo(mi)) wa = mi.rcWork;
+    else SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+
     int w = geom_.valid ? geom_.w : 300;
     int h = geom_.valid ? geom_.h : 380;
-    int x = wa.right - w;                         // 贴右缘展开
-    int y = (wa.top + wa.bottom) / 2 - h / 2;
-    if (y < wa.top) y = wa.top;
-    if (y + h > wa.bottom) y = wa.bottom - h;
+    int workW = wa.right - wa.left, workH = wa.bottom - wa.top;
+    if (workW > 0 && w > workW) w = workW;
+    if (workH > 0 && h > workH) h = workH;
+    int centerY = wa.top + (int)(CapsuleDockT() * workH + 0.5);
+    int y = ClampInt(centerY - h / 2, wa.top, wa.bottom - h);
+    int x = (CapsuleDockEdge() == DockEdge::Left) ? wa.left : wa.right - w;
     return RECT{ x, y, x + w, y + h };
 }
 
+DockEdge MainWindow::CapsuleDockEdge() const {
+    return ui_.capsuleDockEdge == "left" ? DockEdge::Left : DockEdge::Right;
+}
+
+double MainWindow::CapsuleDockT() const {
+    double t = ui_.capsuleDockT;
+    if (!(t >= 0.0)) t = 0.0; // NaN 兜底（NaN 比较恒 false）
+    if (t > 1.0) t = 1.0;
+    return t;
+}
+
+// 按存档 szDevice 查显示器；找不到返回 nullptr（交由 DockMonitorInfo 回退就近）
+HMONITOR MainWindow::FindMonitorByDevice(const std::string& device) const {
+    if (device.empty()) return nullptr;
+    struct Ctx { const std::string* want; HMONITOR found; } ctx{ &device, nullptr };
+    EnumDisplayMonitors(nullptr, nullptr,
+        [](HMONITOR h, HDC, LPRECT, LPARAM lp) -> BOOL {
+            auto* c = reinterpret_cast<Ctx*>(lp);
+            MONITORINFOEXW mi{}; mi.cbSize = sizeof(mi);
+            if (GetMonitorInfoW(h, (MONITORINFO*)&mi)) {
+                if (MonitorDeviceUtf8(mi.szDevice) == *c->want) { c->found = h; return FALSE; }
+            }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&ctx));
+    return ctx.found;
+}
+
+bool MainWindow::DockMonitorInfo(MONITORINFOEXW& mi) const {
+    HMONITOR mon = FindMonitorByDevice(ui_.capsuleMonitor);
+    if (!mon) mon = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
+    mi = {};
+    mi.cbSize = sizeof(mi);
+    return mon && GetMonitorInfoW(mon, (MONITORINFO*)&mi);
+}
+
+void MainWindow::SetCapsuleStyle(CapsuleStyle s) {
+    if (s == capsuleStyle_) return;
+    capsuleStyle_ = s;
+    ui_.capsuleStyle = (s == CapsuleStyle::Dot) ? "dot" : "slim";
+    if (mountMode_ == MountMode::Capsule && !animActive_) {
+        RECT t = capsuleExpanded_ ? ExpandedTargetRect() : CapsuleTargetRect();
+        SetWindowPos(hwnd_, HWND_TOPMOST, t.left, t.top,
+                     t.right - t.left, t.bottom - t.top, SWP_NOACTIVATE);
+        UpdateLayeredState(); // resize 后再算 region/alpha，避免用旧样式尺寸的椭圆
+    }
+    ScheduleSave();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+// 按当前样式 / 折叠 / hover 维护整窗 alpha：Slim 折叠静止半透明，hover/展开/动画/Dot 不透明
+void MainWindow::UpdateLayeredState() {
+    LONG_PTR ex = GetWindowLongPtrW(hwnd_, GWL_EXSTYLE);
+    const bool wantLayered = (mountMode_ == MountMode::Capsule && capsuleStyle_ == CapsuleStyle::Slim);
+    const bool hasLayered = (ex & WS_EX_LAYERED) != 0;
+
+    if (wantLayered) {
+        if (!hasLayered) {
+            SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+            SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        }
+        BYTE alpha = (capsuleShrunk() && !capsuleHover_)
+                     ? (BYTE)(Theme::kCapsuleSlimAlpha * 255.0f) : 255;
+        SetLayeredWindowAttributes(hwnd_, 0, alpha, LWA_ALPHA);
+    } else if (hasLayered) {
+        SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, ex & ~WS_EX_LAYERED);
+        SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
+    UpdateCapsuleRegion(); // 形态 / 样式 / 折叠变化时同步圆点的椭圆区域
+}
+
+// 圆点折叠态用椭圆窗口区域确保圆形（确定裁剪，不依赖 DWM 圆角 hint）
+void MainWindow::UpdateCapsuleRegion() {
+    const bool wantCircle = (mountMode_ == MountMode::Capsule
+                             && capsuleStyle_ == CapsuleStyle::Dot && capsuleShrunk());
+    if (wantCircle) {
+        RECT rc;
+        GetClientRect(hwnd_, &rc);
+        SetWindowRgn(hwnd_, CreateEllipticRgn(0, 0, rc.right - rc.left + 1, rc.bottom - rc.top + 1), TRUE);
+    } else {
+        SetWindowRgn(hwnd_, nullptr, TRUE); // 其余形态恢复矩形窗口
+    }
+}
+
+void MainWindow::BeginCapsulePress(int x, int y) {
+    capsulePressing_ = true;
+    capsuleDragging_ = false;
+    capsulePressClient_ = POINT{ x, y };
+    GetCursorPos(&capsulePressScreen_);
+    // 复用 WM_LBUTTONDOWN 已建立的 capture，不重复 SetCapture
+}
+
+void MainWindow::UpdateCapsulePress(bool lButton) {
+    if (!capsulePressing_) return;
+    if (!lButton) { FinishCapsulePress(); return; } // 异常释放也走收尾（吸附）
+    POINT cur{};
+    GetCursorPos(&cur);
+    int adx = cur.x - capsulePressScreen_.x; if (adx < 0) adx = -adx;
+    int ady = cur.y - capsulePressScreen_.y; if (ady < 0) ady = -ady;
+    if (!capsuleDragging_ &&
+        (adx >= GetSystemMetrics(SM_CXDRAG) || ady >= GetSystemMetrics(SM_CYDRAG)))
+        capsuleDragging_ = true;
+    if (!capsuleDragging_) return;
+    SetWindowPos(hwnd_, HWND_TOPMOST, cur.x - capsulePressClient_.x, cur.y - capsulePressClient_.y,
+                 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+void MainWindow::FinishCapsulePress() {
+    if (!capsulePressing_) return;
+    const bool wasDrag = capsuleDragging_;
+    capsulePressing_ = false;
+    capsuleDragging_ = false;
+    // 不 ReleaseCapture：由 WM_LBUTTONUP 释放
+    if (wasDrag) SnapCapsuleToNearestEdge();
+    else if (capsuleShrunk()) StartCapsuleAnim(true); // 点击展开
+}
+
+void MainWindow::CancelCapsulePress() {
+    const bool wasDrag = capsuleDragging_;
+    capsulePressing_ = false;
+    capsuleDragging_ = false;
+    if (wasDrag) SnapCapsuleToNearestEdge(); // 被夺 capture 也吸附，避免飘在边外
+}
+
+void MainWindow::SnapCapsuleToNearestEdge() {
+    RECT wr{};
+    if (!GetWindowRect(hwnd_, &wr)) return;
+    POINT center{ (wr.left + wr.right) / 2, (wr.top + wr.bottom) / 2 };
+    HMONITOR mon = MonitorFromPoint(center, MONITOR_DEFAULTTONEAREST);
+    MONITORINFOEXW mi{};
+    mi.cbSize = sizeof(mi);
+    if (!mon || !GetMonitorInfoW(mon, (MONITORINFO*)&mi)) return;
+    RECT wa = mi.rcWork;
+    int distLeft = center.x - wa.left;
+    int distRight = wa.right - center.x;
+    DockEdge edge = (distLeft <= distRight) ? DockEdge::Left : DockEdge::Right;
+    int workH = wa.bottom - wa.top;
+    double t = workH > 0 ? (double)(center.y - wa.top) / workH : 0.5;
+    if (t < 0.0) t = 0.0;
+    if (t > 1.0) t = 1.0;
+    ui_.capsuleDockEdge = (edge == DockEdge::Left) ? "left" : "right";
+    ui_.capsuleDockT = t;
+    ui_.capsuleMonitor = MonitorDeviceUtf8(mi.szDevice);
+    RECT target = CapsuleTargetRect();
+    SetWindowPos(hwnd_, HWND_TOPMOST, target.left, target.top,
+                 target.right - target.left, target.bottom - target.top, SWP_NOACTIVATE);
+    capsuleHover_ = false; // 吸附到新位后清 hover，由后续鼠标移动重新判定
+    UpdateLayeredState();  // 按最终尺寸刷新 alpha 与圆点区域
+    ScheduleSave();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
 void MainWindow::CaptureVisibleGeometry() {
+    if (mountMode_ != MountMode::Normal) return; // (R1-F003) 非普通态不写回 geom_
     RECT rc;
     if (!GetWindowRect(hwnd_, &rc)) return;
     int w = rc.right - rc.left;
@@ -576,7 +806,9 @@ void MainWindow::StartCapsuleAnim(bool expand) {
     animStep_ = 0;
     animActive_ = true;
     capsuleExpanded_ = expand; // 立即置目标态，绘制据此选择胶囊或完整内容
+    capsuleHover_ = false;     // 形态切换：清 hover，折叠后由鼠标移动重新触发
     SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    UpdateLayeredState(); // 动画期间（animActive_）保持不透明
     SetTimer(hwnd_, kAnimTimerId, 15, nullptr);
 }
 
@@ -594,6 +826,7 @@ void MainWindow::OnAnimTick() {
     if (animStep_ >= kAnimSteps) {
         KillTimer(hwnd_, kAnimTimerId);
         animActive_ = false;
+        UpdateLayeredState(); // 折叠静止 → Slim 恢复半透明
         InvalidateRect(hwnd_, nullptr, FALSE); // 定型后按最终态（胶囊/完整）重绘
     }
 }

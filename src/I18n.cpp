@@ -8,6 +8,8 @@ const wchar_t* T(Str key, Lang lang) {
         case Str::ModeNormal:    return zh ? L"普通窗口"        : L"Normal window";
         case Str::ModeDesktop:   return zh ? L"挂到桌面"        : L"On desktop";
         case Str::ModeCapsule:   return zh ? L"侧边胶囊"        : L"Side capsule";
+        case Str::StyleSlim:     return zh ? L"细边"            : L"Slim bar";
+        case Str::StyleDot:      return zh ? L"圆点"            : L"Dot";
         case Str::Autostart:     return zh ? L"开机自启"        : L"Start with Windows";
         case Str::ToggleLang:    return zh ? L"English"         : L"中文"; // 显示可切换到的目标语言
         case Str::Exit:          return zh ? L"退出"            : L"Exit";

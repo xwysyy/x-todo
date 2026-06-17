@@ -8,6 +8,8 @@ enum class Str {
     ModeNormal,   // 普通窗口
     ModeDesktop,  // 挂到桌面
     ModeCapsule,  // 侧边胶囊
+    StyleSlim,    // 胶囊样式：细边
+    StyleDot,     // 胶囊样式：圆点
     Autostart,    // 开机自启
     ToggleLang,   // 语言切换项（显示目标语言名）
     Exit,         // 退出

@@ -2,6 +2,8 @@
 
 #include <windows.h>
 #include <shlobj.h>
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cwchar>
 
@@ -181,6 +183,34 @@ LoadResult Store::Load(TodoModel& model, WindowGeometry& geom, UiState& ui) {
                 if (v == L"zh" || v == L"en")
                     ui.lang = std::string(v.begin(), v.end());
             }
+            size_t sp = line.find(L"capsule_style=");
+            if (sp != std::wstring::npos) {
+                std::wstring v = line.substr(sp + wcslen(L"capsule_style="));
+                while (!v.empty() && (v.back() == L' ' || v.back() == L'\r')) v.pop_back();
+                if (v == L"slim" || v == L"dot")
+                    ui.capsuleStyle = std::string(v.begin(), v.end());
+            }
+            size_t ep = line.find(L"capsule_dock_edge=");
+            if (ep != std::wstring::npos) {
+                std::wstring v = line.substr(ep + wcslen(L"capsule_dock_edge="));
+                while (!v.empty() && (v.back() == L' ' || v.back() == L'\r')) v.pop_back();
+                if (v == L"left" || v == L"right")
+                    ui.capsuleDockEdge = std::string(v.begin(), v.end());
+            }
+            size_t tp = line.find(L"capsule_dock_t=");
+            if (tp != std::wstring::npos) {
+                std::wstring v = line.substr(tp + wcslen(L"capsule_dock_t="));
+                wchar_t* end = nullptr;
+                double d = wcstod(v.c_str(), &end);
+                if (end != v.c_str() && std::isfinite(d))
+                    ui.capsuleDockT = std::clamp(d, 0.0, 1.0);
+            }
+            size_t cp = line.find(L"capsule_monitor=");
+            if (cp != std::wstring::npos) {
+                std::wstring v = line.substr(cp + wcslen(L"capsule_monitor="));
+                while (!v.empty() && (v.back() == L' ' || v.back() == L'\r')) v.pop_back();
+                ui.capsuleMonitor = WideToUtf8(Unescape(v));
+            }
         }
     }
     model.ReplaceAll(std::move(items));
@@ -209,6 +239,15 @@ bool Store::Save(const TodoModel& model, const WindowGeometry& geom, const UiSta
         std::wstring lw(ui.lang.begin(), ui.lang.end());
         text += L"ui lang=" + lw + L"\n";
     }
+    text += L"ui capsule_style=" + std::wstring(ui.capsuleStyle.begin(), ui.capsuleStyle.end()) + L"\n";
+    text += L"ui capsule_dock_edge=" + std::wstring(ui.capsuleDockEdge.begin(), ui.capsuleDockEdge.end()) + L"\n";
+    {
+        wchar_t buf[64];
+        swprintf_s(buf, L"ui capsule_dock_t=%.6f\n", ui.capsuleDockT);
+        text += buf;
+    }
+    if (!ui.capsuleMonitor.empty())
+        text += L"ui capsule_monitor=" + Escape(Utf8ToWide(ui.capsuleMonitor)) + L"\n";
     for (const auto& it : model.Items()) {
         text += L"item ";
         text += it.done ? L"1 " : L"0 ";

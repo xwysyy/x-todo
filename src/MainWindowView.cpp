@@ -16,6 +16,25 @@ std::wstring Trim(const std::wstring& s) {
     size_t b = s.find_last_not_of(L" \t\r\n");
     return s.substr(a, b - a + 1);
 }
+
+int RoundToInt(float v) { return (int)(v >= 0.0f ? v + 0.5f : v - 0.5f); }
+
+// 段落居中时 DWrite 实际渲染的基线相对框顶的 y（用于让浮动 EDIT 的文字基线与渲染态对齐）
+float DWriteBaselineInBox(IDWriteFactory* dwrite, IDWriteTextFormat* format,
+                          const std::wstring& text, float boxW, float boxH) {
+    if (!dwrite || !format) return boxH * 0.5f;
+    const std::wstring probe = text.empty() ? L"Hg" : text + L"Hg";
+    IDWriteTextLayout* layout = nullptr;
+    if (FAILED(dwrite->CreateTextLayout(probe.c_str(), (UINT32)probe.size(), format,
+                                        boxW > 1.0f ? boxW : 1.0f,
+                                        boxH > 1.0f ? boxH : 1.0f, &layout)))
+        return boxH * 0.5f;
+    DWRITE_LINE_METRICS lm{}; UINT32 actual = 0; float baseline = boxH * 0.5f;
+    if (SUCCEEDED(layout->GetLineMetrics(&lm, 1, &actual)) && actual > 0)
+        baseline = (boxH - lm.height) * 0.5f + lm.baseline; // lineTop = (boxH - lm.height)/2
+    layout->Release();
+    return baseline;
+}
 } // namespace
 
 // ——————————————————————————— 布局 ———————————————————————————
@@ -288,20 +307,28 @@ bool MainWindow::Render() {
     GetClientRect(hwnd_, &rc);
     float W = (float)(rc.right - rc.left), H = (float)(rc.bottom - rc.top);
 
-    if (capsuleShrunk()) { // 折叠胶囊：只画小纸块 + 未完成计数
+    if (capsuleShrunk()) { // 折叠胶囊：按样式绘制
         rt_->BeginDraw();
         rt_->SetTransform(D2D1::Matrix3x2F::Identity());
-        rt_->Clear(Theme::Color(Theme::kPaper));
-        D2D1_ROUNDED_RECT rr{ D2D1::RectF(1, 1, W - 1, H - 1), S(8), S(8) };
-        brush_->SetColor(Theme::Color(Theme::kPaperEdge));
-        rt_->DrawRoundedRectangle(rr, brush_, S(1.5f));
-        int n = model_.ActiveCount();
-        wchar_t buf[16];
-        swprintf_s(buf, L"%d", n);
-        brush_->SetColor(Theme::Color(n > 0 ? Theme::kText : Theme::kTextWeak));
-        smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        rt_->DrawTextW(buf, (UINT32)wcslen(buf), smallFormat_, D2D1::RectF(0, 0, W, H), brush_);
-        smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        const int n = model_.ActiveCount();
+        if (capsuleStyle_ == CapsuleStyle::Dot) {
+            // 圆点：整窗填色，由椭圆窗口区域裁成圆；hover 加深作可见提示
+            uint32_t c = capsuleHover_ ? (n > 0 ? Theme::kCheckFillHover : Theme::kHandleHover)
+                                       : (n > 0 ? Theme::kCheckFill : Theme::kHandle);
+            rt_->Clear(Theme::Color(c));
+        } else {
+            // 细边：纸色圆角竖条 + 居中数字（半透明由窗口 alpha 表达，绘制不改色）
+            rt_->Clear(Theme::Color(Theme::kPaper));
+            D2D1_ROUNDED_RECT rr{ D2D1::RectF(0.75f, 0.75f, W - 0.75f, H - 0.75f), S(7), S(7) };
+            brush_->SetColor(Theme::Color(Theme::kPaperEdge));
+            rt_->DrawRoundedRectangle(rr, brush_, S(1.5f));
+            wchar_t buf[16];
+            swprintf_s(buf, L"%d", n);
+            brush_->SetColor(Theme::Color(n > 0 ? Theme::kText : Theme::kTextWeak));
+            smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            rt_->DrawTextW(buf, (UINT32)wcslen(buf), smallFormat_, D2D1::RectF(0, 0, W, H), brush_);
+            smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        }
         if (rt_->EndDraw() == (HRESULT)D2DERR_RECREATE_TARGET) {
             DiscardDeviceResources();
             return false;
@@ -348,7 +375,7 @@ bool MainWindow::Render() {
 
 void MainWindow::OnLButtonDown(float x, float y) {
     if (animActive_) return;                                     // 动画中忽略点击
-    if (capsuleShrunk()) { StartCapsuleAnim(true); return; }     // 胶囊态点击也滑出
+    if (capsuleShrunk()) { BeginCapsulePress((int)x, (int)y); return; } // 区分点击展开 / 拖动吸附
     if (editing()) { CommitEdit(false); return; }
     Hit h = HitTest(x, y);
     pressHit_ = h;
@@ -361,6 +388,7 @@ void MainWindow::OnLButtonDown(float x, float y) {
 }
 
 void MainWindow::OnLButtonUp(float x, float y) {
+    if (capsulePressing_) { FinishCapsulePress(); return; } // 胶囊按压：松手收尾（展开或吸附）
     if (dragging_) {
         dragging_ = false;
         int target = dragInsert_;
@@ -414,7 +442,8 @@ void MainWindow::OnLButtonUp(float x, float y) {
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
-void MainWindow::OnMouseMove(float x, float y, bool /*lButton*/) {
+void MainWindow::OnMouseMove(float x, float y, bool lButton) {
+    if (capsulePressing_) { UpdateCapsulePress(lButton); return; } // 胶囊按压：判定拖动并跟随
     if (dragging_) {
         dragY_ = y;
         float docY = y - ContentTop() + scroll_;
@@ -568,28 +597,43 @@ void MainWindow::LayoutEditBox() {
     if (!editing() || !edit_) return;
     float off = ContentTop() - scroll_;
     for (const RowLayout& r : rows_) {
-        if (r.itemIndex == editIndex_ && !r.completed) {
-            int rowTop = (int)(r.row.top + off);
-            int rowH = (int)(r.row.bottom - r.row.top);
-            int h = (int)S(24);
-            if (editFont_) {
-                HDC hdc = GetDC(edit_);
-                if (hdc) {
-                    HFONT oldFont = (HFONT)SelectObject(hdc, editFont_);
-                    TEXTMETRICW tm{};
-                    if (GetTextMetricsW(hdc, &tm))
-                        h = tm.tmHeight + tm.tmExternalLeading + (int)S(4);
-                    SelectObject(hdc, oldFont);
-                    ReleaseDC(edit_, hdc);
-                }
+        if (r.itemIndex != editIndex_ || r.completed) continue;
+
+        const int rowTop = RoundToInt(r.row.top + off);
+        const int rowH   = RoundToInt(r.row.bottom - r.row.top);
+        const int left   = RoundToInt(r.text.left);
+        const int width  = RoundToInt(r.text.right - r.text.left);
+        if (rowH <= 0 || width <= 0) return;
+
+        TEXTMETRICW tm{};
+        bool haveGdi = false;
+        if (editFont_) {
+            HDC hdc = GetDC(edit_);
+            if (hdc) {
+                HFONT oldFont = (HFONT)SelectObject(hdc, editFont_);
+                haveGdi = GetTextMetricsW(hdc, &tm) != FALSE;
+                SelectObject(hdc, oldFont);
+                ReleaseDC(edit_, hdc);
             }
-            if (h > rowH) h = rowH;
-            int left = (int)r.text.left;
-            int top  = rowTop + (rowH - h) / 2;
-            int w    = (int)(r.text.right - r.text.left);
-            MoveWindow(edit_, left, top, w, h, TRUE);
-            return;
         }
+        if (!haveGdi) tm.tmAscent = RoundToInt(S(Theme::kFontSize) * 0.8f);
+
+        const std::wstring& cur =
+            (editIndex_ >= 0 && editIndex_ < model_.Count())
+                ? model_.Items()[editIndex_].text : std::wstring();
+        const float targetBaseline =
+            DWriteBaselineInBox(dwrite_, textFormat_, cur, (float)width, (float)rowH);
+
+        // 先以整行高放置，让单行 EDIT 建立格式化矩形
+        MoveWindow(edit_, left, rowTop, width, rowH, FALSE);
+        RECT fmt{};
+        SendMessageW(edit_, EM_GETRECT, 0, (LPARAM)&fmt);
+        if (fmt.bottom <= fmt.top) fmt.top = 0;
+
+        // 单行 EDIT 文字基线在客户顶下方 (fmt.top + tmAscent)；令其与渲染基线 targetBaseline 对齐
+        const int top = rowTop + RoundToInt(targetBaseline) - (fmt.top + (int)tm.tmAscent);
+        MoveWindow(edit_, left, top, width, rowH, TRUE);
+        return;
     }
 }
 

@@ -24,7 +24,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
         if (!window.Create()) {
             code = 1;
         } else {
-            window.Show();
+            window.Show(false); // 冷启动：胶囊模式保持折叠（唤起才展开）
             MSG msg;
             while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
                 TranslateMessage(&msg);

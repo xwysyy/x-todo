@@ -28,6 +28,8 @@ constexpr uint32_t kDivider     = 0xE7DECB; // 分隔线
 constexpr uint32_t kDanger      = 0xC8755E; // 删除 / 危险
 constexpr uint32_t kHandle      = 0xC4BBA6; // 拖动手柄
 constexpr uint32_t kDragGhost   = 0xEFE7D4; // 拖动占位高亮
+constexpr uint32_t kCheckFillHover = 0x6E8A5D; // 圆点胶囊悬停：加深柔绿
+constexpr uint32_t kHandleHover    = 0xB0A78F; // 圆点胶囊悬停：加深灰
 
 // —— 尺寸（逻辑像素）——
 constexpr float kCorner     = 12.0f; // 窗口圆角半径
@@ -40,6 +42,12 @@ constexpr float kSmallFont  = 12.0f; // 小字号
 constexpr float kResizeEdge = 6.0f;  // 缩放命中边缘宽度
 constexpr float kFooterH    = 32.0f; // 底部"新增"区高度
 constexpr float kSectionH   = 26.0f; // 已完成折叠条高度
+
+// 胶囊折叠态尺寸与半透明（仅 Capsule 形态使用）
+constexpr float kCapsuleSlimW     = 14.0f; // 细边胶囊折叠宽
+constexpr float kCapsuleSlimH     = 96.0f; // 细边胶囊折叠高
+constexpr float kCapsuleDot       = 16.0f; // 圆点胶囊直径（折叠为正方）
+constexpr float kCapsuleSlimAlpha = 0.60f; // 细边折叠静止不透明度（hover/展开=1.0）
 
 constexpr wchar_t kFontFamily[] = L"Microsoft YaHei UI"; // 含中英文字形
 

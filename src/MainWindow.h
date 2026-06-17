@@ -16,11 +16,17 @@ inline constexpr wchar_t kWindowClass[] = L"XTodoWindowClass";
 // 挂载形态：普通窗口 / 挂到桌面层 / 侧边吸附胶囊
 enum class MountMode { Normal, Desktop, Capsule };
 
+// 胶囊外观样式（仅 Capsule 形态）：细边长条 / 圆点
+enum class CapsuleStyle { Slim, Dot };
+
+// 胶囊吸附的屏幕竖边
+enum class DockEdge { Left, Right };
+
 // 桌面便签主窗口：无边框、Direct2D 自绘、托盘常驻。
 class MainWindow {
 public:
     bool Create();
-    void Show();
+    void Show(bool expandCapsule = true);
     HWND Hwnd() const { return hwnd_; }
 
 private:
@@ -97,6 +103,7 @@ private:
     // —— 挂载形态（普通 / 挂桌面 / 侧边胶囊）——
     void        SetMountMode(MountMode m);
     void        ApplyMountMode();
+    void        SetCapsuleStyle(CapsuleStyle s);
     void        StartCapsuleAnim(bool expand);
     void        OnAnimTick();
     void        MaybeCollapseCapsule(); // 编辑结束后若鼠标已在窗口外则收回胶囊
@@ -106,6 +113,19 @@ private:
     bool        capsuleShrunk() const {
         return mountMode_ == MountMode::Capsule && !capsuleExpanded_ && !animActive_;
     }
+
+    // —— 胶囊拖动 / 吸附（折叠态可拖到任意显示器的左 / 右竖边）——
+    void        BeginCapsulePress(int x, int y);
+    void        UpdateCapsulePress(bool lButton);
+    void        FinishCapsulePress();
+    void        CancelCapsulePress();
+    void        SnapCapsuleToNearestEdge();
+    DockEdge    CapsuleDockEdge() const;
+    double      CapsuleDockT() const;
+    bool        DockMonitorInfo(MONITORINFOEXW& mi) const;
+    HMONITOR    FindMonitorByDevice(const std::string& device) const;
+    void        UpdateLayeredState();  // 按样式 / 折叠 / hover 维护 WS_EX_LAYERED 整窗 alpha
+    void        UpdateCapsuleRegion(); // 圆点折叠态用椭圆窗口区域确保圆形（不依赖 DWM 圆角 hint）
 
     // —— 行为 ——
     bool Confirm(Str message, UINT icon);
@@ -164,10 +184,16 @@ private:
     bool trayAdded_ = false;
     UINT taskbarCreatedMsg_ = 0; // Explorer 重启后重建托盘图标的消息 ID
 
-    Lang      lang_           = Lang::Zh;
-    MountMode mountMode_      = MountMode::Normal;
+    Lang         lang_            = Lang::Zh;
+    MountMode    mountMode_       = MountMode::Normal;
+    CapsuleStyle capsuleStyle_    = CapsuleStyle::Slim; // 胶囊外观
     bool      capsuleExpanded_ = false;  // 胶囊形态下是否已滑出
     bool      animActive_     = false;
+    bool      capsulePressing_ = false;  // 折叠胶囊：鼠标按下中（待区分点击 / 拖动）
+    bool      capsuleDragging_ = false;  // 折叠胶囊：已越过阈值进入拖动
+    bool      capsuleHover_    = false;  // 折叠胶囊：鼠标悬停视觉提示
+    POINT     capsulePressClient_{};     // 按下点（客户坐标，拖动时窗口跟随）
+    POINT     capsulePressScreen_{};     // 按下点（屏幕坐标，阈值判定）
     RECT      animFrom_{};
     RECT      animTo_{};
     int       animStep_       = 0;
