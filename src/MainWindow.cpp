@@ -9,6 +9,9 @@
 #ifndef DWMWA_WINDOW_CORNER_PREFERENCE
 #define DWMWA_WINDOW_CORNER_PREFERENCE 33
 #endif
+#ifndef DWMWA_BORDER_COLOR
+#define DWMWA_BORDER_COLOR 34
+#endif
 
 namespace {
 template <class T> void SafeRelease(T** p) {
@@ -265,8 +268,8 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
             UpdateLayeredState();
             InvalidateRect(hwnd_, nullptr, FALSE);
         }
-        if (mountMode_ == MountMode::Capsule && capsuleExpanded_ && !animActive_ && !editing())
-            StartCapsuleAnim(false); // 鼠标离开展开的便签：滑回胶囊
+        if (mountMode_ == MountMode::Capsule && capsuleExpanded_ && !animActive_ && !editing() && !menuOpen_)
+            StartCapsuleAnim(false); // 鼠标离开展开的便签：滑回胶囊（菜单存活期间不收缩）
         return 0;
 
     case WM_MOUSEWHEEL:
@@ -523,6 +526,8 @@ void MainWindow::HandleMenuCommand(UINT cmd) {
 }
 
 void MainWindow::ShowTrayMenu() {
+    const bool wasShrunk = capsuleShrunk(); // (R1-F001) 记录弹出前是否折叠
+
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING, 1, T(Str::Show, lang_));
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -533,9 +538,13 @@ void MainWindow::ShowTrayMenu() {
     POINT pt;
     GetCursorPos(&pt);
     SetForegroundWindow(hwnd_); // 经典坑：否则菜单不会自动关闭
+    menuOpen_ = true;
     UINT cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd_, nullptr);
+    menuOpen_ = false;                 // 必须在 HandleMenuCommand 前清，且无论返回值
     DestroyMenu(menu);
     HandleMenuCommand(cmd);
+    // (R1-F001) 补判收缩，排除：退出(3)；以及刚由 Show(1) 把折叠胶囊展开的情形（否则光标在窗外会被立刻收回）
+    if (cmd != 3 && !(cmd == 1 && wasShrunk)) MaybeCollapseCapsule();
 }
 
 void MainWindow::ShowTitleMenu() {
@@ -547,9 +556,12 @@ void MainWindow::ShowTitleMenu() {
     POINT pt{ (LONG)menuRect_.left, (LONG)menuRect_.bottom }; // 弹在菜单按钮下方
     ClientToScreen(hwnd_, &pt);
     SetForegroundWindow(hwnd_);
+    menuOpen_ = true;
     UINT cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTBUTTON, pt.x, pt.y, 0, hwnd_, nullptr);
+    menuOpen_ = false;                 // 必须在 HandleMenuCommand 前清，且无论返回值
     DestroyMenu(menu);
     HandleMenuCommand(cmd);
+    if (cmd != 3) MaybeCollapseCapsule(); // (R1-F001) 非退出：按真实光标位置补判（cmd==3 已 DestroyWindow）
 }
 
 void MainWindow::SetLanguage(Lang lang) {
@@ -672,11 +684,15 @@ void MainWindow::SetCapsuleStyle(CapsuleStyle s) {
     if (s == capsuleStyle_) return;
     capsuleStyle_ = s;
     ui_.capsuleStyle = (s == CapsuleStyle::Dot) ? "dot" : "slim";
-    if (mountMode_ == MountMode::Capsule && !animActive_) {
-        RECT t = capsuleExpanded_ ? ExpandedTargetRect() : CapsuleTargetRect();
+    if (mountMode_ == MountMode::Capsule) {
+        if (animActive_) {                 // (R1-F005) 动画中切样式：先定格到终态，避免 region 落在旧样式尺寸
+            KillTimer(hwnd_, kAnimTimerId);
+            animActive_ = false;           // capsuleExpanded_ 已是动画目标态（StartCapsuleAnim 立即置）
+        }
+        RECT t = capsuleExpanded_ ? ExpandedTargetRect() : CapsuleTargetRect(); // 按新样式算尺寸
         SetWindowPos(hwnd_, HWND_TOPMOST, t.left, t.top,
                      t.right - t.left, t.bottom - t.top, SWP_NOACTIVATE);
-        UpdateLayeredState(); // resize 后再算 region/alpha，避免用旧样式尺寸的椭圆
+        UpdateLayeredState(); // resize 后再算 region/alpha/corner/border，避免用旧样式尺寸的形状
     }
     ScheduleSave();
     InvalidateRect(hwnd_, nullptr, FALSE);
@@ -705,14 +721,41 @@ void MainWindow::UpdateLayeredState() {
     UpdateCapsuleRegion(); // 形态 / 样式 / 折叠变化时同步圆点的椭圆区域
 }
 
-// 圆点折叠态用椭圆窗口区域确保圆形（确定裁剪，不依赖 DWM 圆角 hint）
+// 折叠态用 window region 定形（Slim 圆角矩形 / Dot 椭圆），并关 DWM 圆角 / 边框，
+// 消除「DWM 系统圆角 / 边框」与「region / 自绘轮廓」的多层叠加；其余形态恢复矩形 + ROUND。
 void MainWindow::UpdateCapsuleRegion() {
-    const bool wantCircle = (mountMode_ == MountMode::Capsule
-                             && capsuleStyle_ == CapsuleStyle::Dot && capsuleShrunk());
-    if (wantCircle) {
-        RECT rc;
-        GetClientRect(hwnd_, &rc);
-        SetWindowRgn(hwnd_, CreateEllipticRgn(0, 0, rc.right - rc.left + 1, rc.bottom - rc.top + 1), TRUE);
+    const bool slimShrunk = mountMode_ == MountMode::Capsule
+                            && capsuleStyle_ == CapsuleStyle::Slim && capsuleShrunk();
+    const bool dotShrunk  = mountMode_ == MountMode::Capsule
+                            && capsuleStyle_ == CapsuleStyle::Dot  && capsuleShrunk();
+    const bool regionShrunk = slimShrunk || dotShrunk;
+
+    // (R1-F003) 折叠态（Slim 或 Dot）关 DWM 圆角，消除系统圆角外缘与 region/自绘轮廓叠层；其余态恢复 ROUND
+    int corner = regionShrunk ? 1 : 2; // 1=DWMWCP_DONOTROUND, 2=DWMWCP_ROUND
+    DwmSetWindowAttribute(hwnd_, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
+
+    // (R1-F004 / RQ2) 折叠 region 态压制 DWM 边框线（Win11），其余恢复默认
+    COLORREF border = regionShrunk ? 0xFFFFFFFE /* DWMWA_COLOR_NONE */
+                                   : 0xFFFFFFFF /* DWMWA_COLOR_DEFAULT */;
+    DwmSetWindowAttribute(hwnd_, DWMWA_BORDER_COLOR, &border, sizeof(border));
+
+    HRGN rgn = nullptr;
+    if (dotShrunk) {
+        RECT rc; GetClientRect(hwnd_, &rc);
+        rgn = CreateEllipticRgn(0, 0, rc.right - rc.left + 1, rc.bottom - rc.top + 1);
+    } else if (slimShrunk) {
+        RECT rc; GetClientRect(hwnd_, &rc);
+        int w = rc.right - rc.left, h = rc.bottom - rc.top;
+        int d = (int)(S(7) * 2.0f + 0.5f);              // 圆角直径 = 2×自绘半径 S(7)，与描边对齐
+        int sMin = (w < h ? w : h); if (d > sMin) d = sMin; // NOMINMAX：不用 min 宏；防直径超短边
+        rgn = CreateRoundRectRgn(0, 0, w + 1, h + 1, d, d);
+    }
+
+    if (regionShrunk) {
+        // (R1-F002) 创建失败：显式清旧 region（退化矩形），不残留上一样式的椭圆/圆角
+        if (!rgn) { SetWindowRgn(hwnd_, nullptr, TRUE); return; }
+        // SetWindowRgn 失败时系统未接管，调用方仍拥有 HRGN，须释放；并清旧 region 退化矩形，不残留上一样式形状
+        if (!SetWindowRgn(hwnd_, rgn, TRUE)) { DeleteObject(rgn); SetWindowRgn(hwnd_, nullptr, TRUE); }
     } else {
         SetWindowRgn(hwnd_, nullptr, TRUE); // 其余形态恢复矩形窗口
     }
@@ -813,6 +856,7 @@ void MainWindow::StartCapsuleAnim(bool expand) {
 }
 
 void MainWindow::OnAnimTick() {
+    if (!animActive_) return; // 已定格的动画：忽略 KillTimer 后仍滞留入队的 WM_TIMER（用旧 animFrom_/animTo_ 会错位）
     animStep_++;
     float t = (float)animStep_ / kAnimSteps;
     if (t > 1.0f) t = 1.0f;

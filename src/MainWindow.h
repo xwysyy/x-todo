@@ -125,7 +125,7 @@ private:
     bool        DockMonitorInfo(MONITORINFOEXW& mi) const;
     HMONITOR    FindMonitorByDevice(const std::string& device) const;
     void        UpdateLayeredState();  // 按样式 / 折叠 / hover 维护 WS_EX_LAYERED 整窗 alpha
-    void        UpdateCapsuleRegion(); // 圆点折叠态用椭圆窗口区域确保圆形（不依赖 DWM 圆角 hint）
+    void        UpdateCapsuleRegion(); // 折叠态（Slim 圆角矩形 / Dot 椭圆）用 window region 定形并关 DWM 圆角 / 边框
 
     // —— 行为 ——
     bool Confirm(Str message, UINT icon);
@@ -192,6 +192,7 @@ private:
     bool      capsulePressing_ = false;  // 折叠胶囊：鼠标按下中（待区分点击 / 拖动）
     bool      capsuleDragging_ = false;  // 折叠胶囊：已越过阈值进入拖动
     bool      capsuleHover_    = false;  // 折叠胶囊：鼠标悬停视觉提示
+    bool      menuOpen_        = false;  // 弹出菜单存活期间：抑制 WM_MOUSELEAVE 误触收缩
     POINT     capsulePressClient_{};     // 按下点（客户坐标，拖动时窗口跟随）
     POINT     capsulePressScreen_{};     // 按下点（屏幕坐标，阈值判定）
     RECT      animFrom_{};

@@ -585,11 +585,11 @@ void MainWindow::CancelEdit() {
 }
 
 void MainWindow::MaybeCollapseCapsule() {
-    if (mountMode_ != MountMode::Capsule || !capsuleExpanded_ || animActive_) return;
+    if (mountMode_ != MountMode::Capsule || !capsuleExpanded_ || animActive_ || editing()) return;
     POINT cur;
     GetCursorPos(&cur);
     RECT wr;
-    GetWindowRect(hwnd_, &wr);
+    if (!GetWindowRect(hwnd_, &wr)) return;
     if (!PtInRect(&wr, cur)) StartCapsuleAnim(false);
 }
 
