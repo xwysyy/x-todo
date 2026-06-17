@@ -234,7 +234,7 @@ void MainWindow::PaintTaskbarBand(HWND hwnd) {
 
     // 整块填充：覆盖所有像素，避免父任务栏重绘后残影。
     HBRUSH bg = CreateSolidBrush(RGB(28, 28, 30));
-    FillRect(mem, &rc, bg);
+    ::FillRect(mem, &rc, bg);
     DeleteObject(bg);
 
     COLORREF chip = taskbarPressed_ ? RGB(74, 74, 82)
