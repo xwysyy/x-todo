@@ -309,12 +309,15 @@ void MainWindow::DrawAddRow(bool hovered) {
     if (hovered) FillRect(addRect_, Theme::kHover, 0.04f);
 
     const float size = S(Theme::kCheckSize);
-    const float cx = addRect_.left + size / 2.0f;
     const float cy = (addRect_.top + addRect_.bottom) / 2.0f;
-    const float half = S(5);
+    D2D1_RECT_F icon = D2D1::RectF(addRect_.left, cy - size / 2.0f,
+                                   addRect_.left + size, cy + size / 2.0f);
+    const float cx = (float)RoundToInt((icon.left + icon.right) * 0.5f) + 0.5f;
+    const float iy = (icon.top + icon.bottom) * 0.5f;
+    const float half = S(6);
     brush_->SetColor(Theme::Color(hovered ? Theme::kCheckFill : Theme::kHandle));
-    rt_->DrawLine(D2D1::Point2F(cx - half, cy), D2D1::Point2F(cx + half, cy), brush_, S(1.8f));
-    rt_->DrawLine(D2D1::Point2F(cx, cy - half), D2D1::Point2F(cx, cy + half), brush_, S(1.8f));
+    rt_->DrawLine(D2D1::Point2F(cx - half, iy), D2D1::Point2F(cx + half, iy), brush_, S(1.6f));
+    rt_->DrawLine(D2D1::Point2F(cx, iy - half), D2D1::Point2F(cx, iy + half), brush_, S(1.6f));
 }
 
 bool MainWindow::Render() {
@@ -336,7 +339,8 @@ bool MainWindow::Render() {
         } else {
             // 细边：纸色圆角竖条 + 居中数字（半透明由窗口 alpha 表达，绘制不改色）
             rt_->Clear(Theme::Color(Theme::kPaper));
-            D2D1_ROUNDED_RECT rr{ D2D1::RectF(0.75f, 0.75f, W - 0.75f, H - 0.75f), S(7), S(7) };
+            const float radius = W < H ? W * 0.5f : H * 0.5f;
+            D2D1_ROUNDED_RECT rr{ D2D1::RectF(0.75f, 0.75f, W - 0.75f, H - 0.75f), radius, radius };
             brush_->SetColor(Theme::Color(Theme::kPaperEdge));
             rt_->DrawRoundedRectangle(rr, brush_, S(1.5f));
             wchar_t buf[16];

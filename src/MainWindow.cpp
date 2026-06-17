@@ -1255,43 +1255,36 @@ void MainWindow::UpdateLayeredState() {
         SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     }
-    UpdateCapsuleRegion(); // 形态 / 样式 / 折叠变化时同步圆点的椭圆区域
+    UpdateCapsuleRegion(); // 形态 / 样式 / 折叠变化时同步窗口区域与 DWM 边界属性
 }
 
-// 折叠态用 window region 定形（Slim 圆角矩形 / Dot 椭圆），并关 DWM 圆角 / 边框，
-// 消除「DWM 系统圆角 / 边框」与「region / 自绘轮廓」的多层叠加；其余形态恢复矩形 + ROUND。
+// Dot 折叠态用 window region 定形成圆点；Slim 折叠态交给 DWM 圆角合成，避免 GDI region 硬边。
+// 折叠态压制 DWM 边框线；其余形态恢复矩形 + ROUND。
 void MainWindow::UpdateCapsuleRegion() {
     const bool slimShrunk = mountMode_ == MountMode::Capsule
                             && capsuleStyle_ == CapsuleStyle::Slim && capsuleShrunk();
     const bool dotShrunk  = mountMode_ == MountMode::Capsule
                             && capsuleStyle_ == CapsuleStyle::Dot  && capsuleShrunk();
-    const bool regionShrunk = slimShrunk || dotShrunk;
+    const bool suppressBorder = slimShrunk || dotShrunk;
+    const bool regionShrunk = dotShrunk;
 
-    // (R1-F003) 折叠态（Slim 或 Dot）关 DWM 圆角，消除系统圆角外缘与 region/自绘轮廓叠层；其余态恢复 ROUND
-    int corner = regionShrunk ? 1 : 2; // 1=DWMWCP_DONOTROUND, 2=DWMWCP_ROUND
+    int corner = dotShrunk ? 1 : 2; // 1=DWMWCP_DONOTROUND, 2=DWMWCP_ROUND
     DwmSetWindowAttribute(hwnd_, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
 
-    // (R1-F004 / RQ2) 折叠 region 态压制 DWM 边框线（Win11），其余恢复默认
-    COLORREF border = regionShrunk ? 0xFFFFFFFE /* DWMWA_COLOR_NONE */
-                                   : 0xFFFFFFFF /* DWMWA_COLOR_DEFAULT */;
+    COLORREF border = suppressBorder ? 0xFFFFFFFE /* DWMWA_COLOR_NONE */
+                                     : 0xFFFFFFFF /* DWMWA_COLOR_DEFAULT */;
     DwmSetWindowAttribute(hwnd_, DWMWA_BORDER_COLOR, &border, sizeof(border));
 
     HRGN rgn = nullptr;
     if (dotShrunk) {
         RECT rc; GetClientRect(hwnd_, &rc);
         rgn = CreateEllipticRgn(0, 0, rc.right - rc.left + 1, rc.bottom - rc.top + 1);
-    } else if (slimShrunk) {
-        RECT rc; GetClientRect(hwnd_, &rc);
-        int w = rc.right - rc.left, h = rc.bottom - rc.top;
-        int d = (int)(S(7) * 2.0f + 0.5f);              // 圆角直径 = 2×自绘半径 S(7)，与描边对齐
-        int sMin = (w < h ? w : h); if (d > sMin) d = sMin; // NOMINMAX：不用 min 宏；防直径超短边
-        rgn = CreateRoundRectRgn(0, 0, w + 1, h + 1, d, d);
     }
 
     if (regionShrunk) {
-        // (R1-F002) 创建失败：显式清旧 region（退化矩形），不残留上一样式的椭圆/圆角
+        // 创建失败：显式清旧 region（退化矩形），不残留上一样式的椭圆
         if (!rgn) { SetWindowRgn(hwnd_, nullptr, TRUE); return; }
-        // SetWindowRgn 失败时系统未接管，调用方仍拥有 HRGN，须释放；并清旧 region 退化矩形，不残留上一样式形状
+        // SetWindowRgn 失败时系统未接管，调用方仍拥有 HRGN，须释放；并清旧 region 退化矩形
         if (!SetWindowRgn(hwnd_, rgn, TRUE)) { DeleteObject(rgn); SetWindowRgn(hwnd_, nullptr, TRUE); }
     } else {
         SetWindowRgn(hwnd_, nullptr, TRUE); // 其余形态恢复矩形窗口
