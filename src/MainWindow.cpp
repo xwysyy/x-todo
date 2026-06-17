@@ -402,19 +402,19 @@ int MeasurePopupMenuWidth(HWND owner, const std::vector<PopupMenuItem>& items) {
         if (item.separator) continue;
         SIZE sz{};
         GetTextExtentPoint32W(dc, item.text.c_str(), (int)item.text.size(), &sz);
-        int textW = sz.cx + DpiPx(owner, 58 + item.indent * 16);
+        int textW = sz.cx + DpiPx(owner, 50 + item.indent * 14);
         if (textW > maxText) maxText = textW;
     }
     SelectObject(dc, oldFont);
     DeleteObject(font);
     ReleaseDC(owner, dc);
-    int minW = DpiPx(owner, 144);
+    int minW = DpiPx(owner, 112);
     int preferred = maxText + DpiPx(owner, 4);
-    return ClampPopupWidthToOwner(owner, preferred, minW, DpiPx(owner, 240));
+    return ClampPopupWidthToOwner(owner, preferred, minW, DpiPx(owner, 220));
 }
 
 int MeasurePopupMenuHeight(HWND owner, const std::vector<PopupMenuItem>& items) {
-    int rowH = DpiPx(owner, 28), sepH = DpiPx(owner, 8);
+    int rowH = DpiPx(owner, 26), sepH = DpiPx(owner, 7);
     int h = DpiPx(owner, 12);
     for (const auto& item : items) h += item.separator ? sepH : rowH;
     return h;
@@ -458,12 +458,12 @@ LRESULT CALLBACK PopupMenuProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if ((int)i == s->hover)
                 FillRound(dc, row, DpiPx(s->owner, 8), BlendColor(Theme::kHover, Theme::kPaper, 0.06f));
             if (item.checked) {
-                RECT ck{ row.left + DpiPx(s->owner, 10), row.top + DpiPx(s->owner, 8),
-                         row.left + DpiPx(s->owner, 22), row.top + DpiPx(s->owner, 20) };
+                RECT ck{ row.left + DpiPx(s->owner, 8), row.top + DpiPx(s->owner, 7),
+                         row.left + DpiPx(s->owner, 20), row.top + DpiPx(s->owner, 19) };
                 DrawCheckMark(dc, ck, Theme::kCheckFill);
             }
-            RECT textR{ row.left + DpiPx(s->owner, 34 + item.indent * 16), row.top,
-                        row.right - DpiPx(s->owner, 10), row.bottom };
+            RECT textR{ row.left + DpiPx(s->owner, 28 + item.indent * 14), row.top,
+                        row.right - DpiPx(s->owner, 8), row.bottom };
             uint32_t textColor = item.enabled ? (item.danger ? Theme::kDanger : Theme::kText) : Theme::kTextWeak;
             DrawTextInRect(dc, item.text, textR, font, textColor,
                            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
@@ -525,8 +525,8 @@ UINT ShowPopupMenu(HWND owner, POINT pt, const std::vector<PopupMenuItem>& items
     PopupMenuState state{};
     state.owner = owner;
     state.items = &items;
-    state.rowH = DpiPx(owner, 28);
-    state.sepH = DpiPx(owner, 8);
+    state.rowH = DpiPx(owner, 26);
+    state.sepH = DpiPx(owner, 7);
     state.w = MeasurePopupMenuWidth(owner, items);
     state.h = MeasurePopupMenuHeight(owner, items);
 
