@@ -239,6 +239,8 @@ private:
 
     static constexpr UINT_PTR kSaveTimerId = 1;
     static constexpr UINT_PTR kTaskbarRetryTimerId = 3; // Explorer 重启后重建状态条的延迟重试
+    static constexpr UINT_PTR kCollapseTimerId = 4;     // 展开胶囊：鼠标离开后的折叠宽限定时器
+    static constexpr UINT      kCollapseDelayMs = 500;  // 折叠宽限毫秒：移回即取消，避免太敏感
     bool savePending_ = false;
 
     HFONT  editFont_ = nullptr; // 行内编辑框字体

@@ -176,8 +176,8 @@ struct ConfirmState {
 };
 
 RECT ConfirmOkRect(const ConfirmState& s) {
-    int bw = s.btnW, bh = DpiPx(s.owner, 22);
-    int gap = DpiPx(s.owner, 6), pad = DpiPx(s.owner, 10);
+    int bw = s.btnW, bh = DpiPx(s.owner, 24);
+    int gap = DpiPx(s.owner, 8), pad = DpiPx(s.owner, 12);
     int left = (s.w - (bw * 2 + gap)) / 2 + bw + gap; // 居中按钮组的右按钮（确认）
     int top = s.h - pad - bh;
     return RECT{ left, top, left + bw, top + bh };
@@ -185,7 +185,7 @@ RECT ConfirmOkRect(const ConfirmState& s) {
 
 RECT ConfirmCancelRect(const ConfirmState& s) {
     RECT ok = ConfirmOkRect(s);
-    int bw = ok.right - ok.left, gap = DpiPx(s.owner, 6);
+    int bw = ok.right - ok.left, gap = DpiPx(s.owner, 8);
     return RECT{ ok.left - gap - bw, ok.top, ok.left - gap, ok.bottom };
 }
 
@@ -211,7 +211,7 @@ void DrawButton(HDC dc, HWND owner, const RECT& r, const std::wstring& label,
     if (!primary && hover) fill = BlendColor(Theme::kHover, Theme::kPaper, pressed ? 0.10f : 0.05f);
     FillRound(dc, r, radius, fill);
     StrokeRound(dc, r, radius, primary ? Theme::kDanger : Theme::kPaperEdge);
-    HFONT font = CreateUiFont(owner, 10.0f, primary);
+    HFONT font = CreateUiFont(owner, 11.0f, primary);
     RECT tr = r;
     DrawTextInRect(dc, label, tr, font, primary ? 0xFFFFFF : Theme::kText,
                    DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
@@ -237,10 +237,10 @@ LRESULT CALLBACK ConfirmProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         FillRound(dc, rc, DpiPx(s->owner, 16), Theme::kPaper);
         StrokeRound(dc, RECT{ 0, 0, rc.right, rc.bottom }, DpiPx(s->owner, 16), Theme::kPaperEdge);
 
-        int padX = DpiPx(s->owner, 12);
-        int padTop = DpiPx(s->owner, 12);
-        int icon = DpiPx(s->owner, 12);
-        int iconGap = DpiPx(s->owner, 8);
+        int padX = DpiPx(s->owner, 14);
+        int padTop = DpiPx(s->owner, 14);
+        int icon = DpiPx(s->owner, 14);
+        int iconGap = DpiPx(s->owner, 9);
         uint32_t accent = s->danger ? Theme::kDanger : Theme::kCheckFill;
 
         int rowH = s->msgH > icon ? s->msgH : icon;
@@ -252,13 +252,13 @@ LRESULT CALLBACK ConfirmProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         RECT iconRect{ blockLeft, iconTop, blockLeft + icon, iconTop + icon };
         FillRound(dc, iconRect, icon, BlendColor(accent, Theme::kPaper, 0.12f));
         StrokeRound(dc, iconRect, icon, accent);
-        HFONT iconFont = CreateUiFont(s->owner, 7.0f, true);
+        HFONT iconFont = CreateUiFont(s->owner, 8.0f, true);
         RECT ir = iconRect;
         DrawTextInRect(dc, L"!", ir, iconFont, accent,
                        DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         DeleteObject(iconFont);
 
-        HFONT textFont = CreateUiFont(s->owner, 11.0f, false);
+        HFONT textFont = CreateUiFont(s->owner, 12.0f, false);
         int msgLeft = blockLeft + icon + iconGap;
         int msgTop = padTop + (rowH - s->msgH) / 2;
         RECT msgRect{ msgLeft, msgTop, msgLeft + s->msgW, msgTop + s->msgH };
@@ -313,16 +313,16 @@ LRESULT CALLBACK ConfirmProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 void MeasureConfirm(ConfirmState& s) {
-    int padX    = DpiPx(s.owner, 12);
-    int icon    = DpiPx(s.owner, 12);
-    int iconGap = DpiPx(s.owner, 8);
+    int padX    = DpiPx(s.owner, 14);
+    int icon    = DpiPx(s.owner, 14);
+    int iconGap = DpiPx(s.owner, 9);
     int avail   = s.w - padX * 2 - icon - iconGap;
     int minAvail = DpiPx(s.owner, 40);
     if (avail < minAvail) avail = minAvail;
 
     HDC dc = GetDC(s.owner);
 
-    HFONT textFont = CreateUiFont(s.owner, 11.0f, false);
+    HFONT textFont = CreateUiFont(s.owner, 12.0f, false);
     HGDIOBJ prev = SelectObject(dc, textFont);
     RECT mr{ 0, 0, avail, 0 };
     DrawTextW(dc, s.message.c_str(), (int)s.message.size(), &mr,
@@ -332,14 +332,14 @@ void MeasureConfirm(ConfirmState& s) {
     SelectObject(dc, prev);
     DeleteObject(textFont);
 
-    HFONT btnFont = CreateUiFont(s.owner, 10.0f, true);
+    HFONT btnFont = CreateUiFont(s.owner, 11.0f, true);
     prev = SelectObject(dc, btnFont);
-    int btnW = DpiPx(s.owner, 50);
+    int btnW = DpiPx(s.owner, 54);
     const wchar_t* labels[2] = { T(Str::ConfirmOk, s.lang), T(Str::ConfirmCancel, s.lang) };
     for (const wchar_t* txt : labels) {
         SIZE sz{};
         GetTextExtentPoint32W(dc, txt, (int)wcslen(txt), &sz);
-        int need = sz.cx + DpiPx(s.owner, 22);
+        int need = sz.cx + DpiPx(s.owner, 24);
         if (need > btnW) btnW = need;
     }
     s.btnW = btnW;
@@ -350,11 +350,11 @@ void MeasureConfirm(ConfirmState& s) {
 }
 
 int ConfirmHeight(const ConfirmState& s) {
-    int padTop    = DpiPx(s.owner, 12);
-    int padBottom = DpiPx(s.owner, 10);
-    int icon      = DpiPx(s.owner, 12);
-    int msgBtnGap = DpiPx(s.owner, 10);
-    int btnH      = DpiPx(s.owner, 22);
+    int padTop    = DpiPx(s.owner, 14);
+    int padBottom = DpiPx(s.owner, 12);
+    int icon      = DpiPx(s.owner, 14);
+    int msgBtnGap = DpiPx(s.owner, 12);
+    int btnH      = DpiPx(s.owner, 24);
     int rowH = s.msgH > icon ? s.msgH : icon;
     return padTop + rowH + msgBtnGap + btnH + padBottom;
 }
@@ -367,8 +367,8 @@ bool ShowThemedConfirm(HWND owner, const wchar_t* text, Lang lang, bool danger) 
     state.message = text ? text : L"";
     state.lang = lang;
     state.danger = danger;
-    state.w = ClampPopupWidthToOwner(owner, DpiPx(owner, 172),
-                                     DpiPx(owner, 150), DpiPx(owner, 172));
+    state.w = ClampPopupWidthToOwner(owner, DpiPx(owner, 188),
+                                     DpiPx(owner, 160), DpiPx(owner, 188));
     MeasureConfirm(state);
     state.h = ConfirmHeight(state);
 
@@ -422,7 +422,7 @@ struct PopupMenuState {
 
 int MenuItemAt(const PopupMenuState& s, int y) {
     if (!s.items) return -1;
-    int top = DpiPx(s.owner, 4);
+    int top = DpiPx(s.owner, 5);
     for (size_t i = 0; i < s.items->size(); ++i) {
         const PopupMenuItem& item = (*s.items)[i];
         int h = item.separator ? s.sepH : s.rowH;
@@ -454,27 +454,27 @@ void DrawCheckMark(HDC dc, const RECT& box, uint32_t color) {
 
 int MeasurePopupMenuWidth(HWND owner, const std::vector<PopupMenuItem>& items) {
     HDC dc = GetDC(owner);
-    HFONT font = CreateUiFont(owner, 10.0f);
+    HFONT font = CreateUiFont(owner, 11.0f);
     HGDIOBJ oldFont = SelectObject(dc, font);
     int maxText = 0;
     for (const auto& item : items) {
         if (item.separator) continue;
         SIZE sz{};
         GetTextExtentPoint32W(dc, item.text.c_str(), (int)item.text.size(), &sz);
-        int textW = sz.cx + DpiPx(owner, 44 + item.indent * 12);
+        int textW = sz.cx + DpiPx(owner, 46 + item.indent * 14);
         if (textW > maxText) maxText = textW;
     }
     SelectObject(dc, oldFont);
     DeleteObject(font);
     ReleaseDC(owner, dc);
-    int minW = DpiPx(owner, 92);
+    int minW = DpiPx(owner, 100);
     int preferred = maxText + DpiPx(owner, 4);
     return ClampPopupWidthToOwner(owner, preferred, minW, DpiPx(owner, 220));
 }
 
 int MeasurePopupMenuHeight(HWND owner, const std::vector<PopupMenuItem>& items) {
-    int rowH = DpiPx(owner, 20), sepH = DpiPx(owner, 5);
-    int h = DpiPx(owner, 8);
+    int rowH = DpiPx(owner, 22), sepH = DpiPx(owner, 6);
+    int h = DpiPx(owner, 10);
     for (const auto& item : items) h += item.separator ? sepH : rowH;
     return h;
 }
@@ -497,8 +497,8 @@ LRESULT CALLBACK PopupMenuProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         RECT rc{}; GetClientRect(hwnd, &rc);
         FillRound(dc, rc, DpiPx(s->owner, 12), Theme::kPaper);
         StrokeRound(dc, RECT{ 0, 0, rc.right, rc.bottom }, DpiPx(s->owner, 12), Theme::kPaperEdge);
-        HFONT font = CreateUiFont(s->owner, 10.0f);
-        int y = DpiPx(s->owner, 4);
+        HFONT font = CreateUiFont(s->owner, 11.0f);
+        int y = DpiPx(s->owner, 5);
         int pad = DpiPx(s->owner, 10);
         for (size_t i = 0; i < s->items->size(); ++i) {
             const PopupMenuItem& item = (*s->items)[i];
@@ -517,11 +517,11 @@ LRESULT CALLBACK PopupMenuProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if ((int)i == s->hover)
                 FillRound(dc, row, DpiPx(s->owner, 8), BlendColor(Theme::kHover, Theme::kPaper, 0.06f));
             if (item.checked) {
-                RECT ck{ row.left + DpiPx(s->owner, 6), row.top + DpiPx(s->owner, 4),
-                         row.left + DpiPx(s->owner, 18), row.top + DpiPx(s->owner, 16) };
+                RECT ck{ row.left + DpiPx(s->owner, 6), row.top + DpiPx(s->owner, 5),
+                         row.left + DpiPx(s->owner, 18), row.top + DpiPx(s->owner, 17) };
                 DrawCheckMark(dc, ck, Theme::kCheckFill);
             }
-            RECT textR{ row.left + DpiPx(s->owner, 22 + item.indent * 12), row.top,
+            RECT textR{ row.left + DpiPx(s->owner, 24 + item.indent * 14), row.top,
                         row.right - DpiPx(s->owner, 8), row.bottom };
             uint32_t textColor = item.enabled ? (item.danger ? Theme::kDanger : Theme::kText) : Theme::kTextWeak;
             DrawTextInRect(dc, item.text, textR, font, textColor,
@@ -584,8 +584,8 @@ UINT ShowPopupMenu(HWND owner, POINT pt, const std::vector<PopupMenuItem>& items
     PopupMenuState state{};
     state.owner = owner;
     state.items = &items;
-    state.rowH = DpiPx(owner, 20);
-    state.sepH = DpiPx(owner, 5);
+    state.rowH = DpiPx(owner, 22);
+    state.sepH = DpiPx(owner, 6);
     state.w = MeasurePopupMenuWidth(owner, items);
     state.h = MeasurePopupMenuHeight(owner, items);
 
@@ -835,6 +835,11 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_MOUSEMOVE: {
         TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd_, 0 };
         TrackMouseEvent(&tme);
+        { // 仅当光标确实在客户区内才取消折叠宽限：捕获态下拖到窗口外仍会收到 WM_MOUSEMOVE
+            RECT crc{}; GetClientRect(hwnd_, &crc);
+            if (PtInRect(&crc, POINT{ GET_X_LPARAM(lp), GET_Y_LPARAM(lp) }))
+                KillTimer(hwnd_, kCollapseTimerId);
+        }
         if (capsuleShrunk() && !capsulePressing_ && !capsuleHover_) {
             capsuleHover_ = true; // 折叠胶囊：鼠标进入仅视觉提示，不展开
             UpdateLayeredState();
@@ -852,7 +857,7 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
             InvalidateRect(hwnd_, nullptr, FALSE);
         }
         if (mountMode_ == MountMode::Capsule && capsuleExpanded_ && !animActive_ && !editing() && !menuOpen_)
-            StartCapsuleAnim(false); // 鼠标离开展开的便签：滑回胶囊（菜单存活期间不收缩）
+            SetTimer(hwnd_, kCollapseTimerId, kCollapseDelayMs, nullptr); // 离开不立即收：宽限期内移回即取消
         return 0;
 
     case WM_MOUSEWHEEL:
@@ -897,6 +902,15 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
             SaveNow();
         } else if (wp == kAnimTimerId) {
             OnAnimTick();
+        } else if (wp == kCollapseTimerId) {
+            KillTimer(hwnd_, kCollapseTimerId);
+            if (mountMode_ == MountMode::Capsule && capsuleExpanded_ && !animActive_ && !editing() && !menuOpen_) {
+                POINT cur{}; GetCursorPos(&cur);
+                RECT wr{}; GetWindowRect(hwnd_, &wr);
+                bool lbtn = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
+                if (lbtn) SetTimer(hwnd_, kCollapseTimerId, kCollapseDelayMs, nullptr); // 拖动/缩放中：顺延再判
+                else if (!PtInRect(&wr, cur)) StartCapsuleAnim(false); // 仍在窗口外才收回
+            }
         } else if (wp == kTaskbarRetryTimerId) {
             KillTimer(hwnd_, kTaskbarRetryTimerId);
             if (mountMode_ == MountMode::Taskbar) {

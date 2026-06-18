@@ -506,6 +506,10 @@ LRESULT MainWindow::OnNcHitTest(int sx, int sy) {
     ScreenToClient(hwnd_, &p);
     RECT rc;
     GetClientRect(hwnd_, &rc);
+    // 标题栏按钮优先于缩放边缘：避免加宽 resize 边后吞掉按钮顶部像素
+    D2D1_POINT_2F bpt{ (float)p.x, (float)p.y };
+    if (InRect(menuRect_, bpt) || InRect(pinRect_, bpt) || InRect(closeRect_, bpt))
+        return HTCLIENT;
     float e = S(Theme::kResizeEdge);
     bool L = p.x < e, R = p.x >= rc.right - e, T = p.y < e, B = p.y >= rc.bottom - e;
     if (T && L) return HTTOPLEFT;

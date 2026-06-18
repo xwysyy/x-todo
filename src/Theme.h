@@ -39,7 +39,7 @@ constexpr float kRowH       = 34.0f; // 条目行高
 constexpr float kCheckSize  = 18.0f; // 复选框边长
 constexpr float kFontSize   = 14.0f; // 正文字号
 constexpr float kSmallFont  = 12.0f; // 小字号
-constexpr float kResizeEdge = 6.0f;  // 缩放命中边缘宽度
+constexpr float kResizeEdge = 8.0f;  // 缩放命中边缘宽度
 constexpr float kFooterH    = 0.0f;  // 固定底栏高度；新增入口已移入内容区加号行
 constexpr float kSectionH   = 26.0f; // 已完成折叠条高度
 
