@@ -958,6 +958,20 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
                     MessageBoxW(hwnd_, T(Str::TaskbarEmbedFailed, lang_), L"x-todo", MB_OK | MB_ICONWARNING);
                 }
             }
+        } else if (wp == kTaskbarRefreshTimerId) {
+            if (mountMode_ == MountMode::Taskbar && taskbarHwnd_ && IsWindow(taskbarHwnd_)) {
+                TaskbarLayoutResult r = LayoutTaskbarBand();
+                if (r == TaskbarLayoutResult::Ok) {
+                    InvalidateTaskbarBand();
+                } else if (r == TaskbarLayoutResult::Fatal) {
+                    bool mainWasHidden = !IsWindowVisible(hwnd_);
+                    DestroyTaskbarBand();
+                    ShowWindow(hwnd_, SW_SHOW);
+                    ScheduleTaskbarRetry(mainWasHidden);
+                }
+            } else {
+                KillTimer(hwnd_, kTaskbarRefreshTimerId);
+            }
         }
         return 0;
 
