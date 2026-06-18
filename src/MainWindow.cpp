@@ -708,7 +708,7 @@ void MainWindow::Show(bool expandCapsule) {
 }
 
 void MainWindow::InitialShow() {
-    // 冷启动：任务栏模式且状态条已就绪时只留状态条；绑定失败已回退 Normal 则正常显示。
+    // 冷启动：任务栏模式且状态条已就绪时只留状态条；未就绪时显示完整窗口并继续重试。
     if (mountMode_ == MountMode::Taskbar &&
         taskbarHwnd_ && IsWindow(taskbarHwnd_) && IsWindowVisible(taskbarHwnd_))
         return;
@@ -947,18 +947,11 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
             if (mountMode_ == MountMode::Taskbar) {
                 TaskbarLayoutResult r = EnsureTaskbarBand();
                 if (r == TaskbarLayoutResult::Ok && IsTaskbarBandReady()) {
-                    taskbarRetryCount_ = 0; // 成功（含 transient 已自排重试）：清失败计数
                     if (taskbarRetryHideMain_) ShowWindow(hwnd_, SW_HIDE);
                     taskbarRetryHideMain_ = false;
-                } else if (taskbarRetryCount_++ < 3) {
-                    ShowWindow(hwnd_, SW_SHOW);
-                    SetTimer(hwnd_, kTaskbarRetryTimerId, 1500, nullptr);
                 } else {
-                    taskbarRetryCount_ = 0;
-                    taskbarRetryHideMain_ = false;
-                    mountMode_ = MountMode::Normal; ui_.mountMode = "normal";
-                    ShowWindow(hwnd_, SW_SHOW); ApplyMountMode();
-                    MessageBoxW(hwnd_, T(Str::TaskbarEmbedFailed, lang_), L"x-todo", MB_OK | MB_ICONWARNING);
+                    ShowWindow(hwnd_, SW_SHOW);
+                    SetTimer(hwnd_, kTaskbarRetryTimerId, 3000, nullptr);
                 }
             }
         } else if (wp == kTaskbarRefreshTimerId) {
@@ -1207,10 +1200,9 @@ void MainWindow::SetMountMode(MountMode m) {
     if (editing()) CommitEdit(false);
     if (!capsuleShrunk()) CaptureVisibleGeometry();
 
-    // 任务栏模式可能创建失败：成功才提交模式，失败保持原模式并提示一次
+    // 任务栏模式按 TrafficMonitor 的生命周期持续重建；首次未就绪不弹窗回退。
     if (m == MountMode::Taskbar) {
-        if (!TryEnterTaskbarMode(true))
-            MessageBoxW(hwnd_, T(Str::TaskbarEmbedFailed, lang_), L"x-todo", MB_OK | MB_ICONWARNING);
+        TryEnterTaskbarMode(true);
         return;
     }
     // 从任务栏模式切到其它模式：先销毁状态条，再走常规流程
@@ -1237,11 +1229,8 @@ void MainWindow::ApplyMountMode() {
         if (r == TaskbarLayoutResult::TransientUnavailable) {
             ScheduleTaskbarRetry(true);
         } else {
-            // 绑定失败（含冷启动 mount=taskbar）：回退 Normal 并提示一次
             DestroyTaskbarBand();
-            mountMode_ = MountMode::Normal;
-            ui_.mountMode = "normal";
-            MessageBoxW(hwnd_, T(Str::TaskbarEmbedFailed, lang_), L"x-todo", MB_OK | MB_ICONWARNING);
+            ScheduleTaskbarRetry(true);
         }
     }
 

@@ -215,6 +215,8 @@ private:
     // 任务栏状态条
     HWND  taskbarHwnd_           = nullptr;
     HWND  taskbarParent_         = nullptr;
+    bool  taskbarInserted_       = false;
+    DWORD taskbarAttachError_    = ERROR_SUCCESS;
     bool  taskbarHover_          = false;
     bool  taskbarPressed_        = false;
     bool  taskbarDragging_       = false;
@@ -223,7 +225,6 @@ private:
     RECT  taskbarBandRect_{};
     int   taskbarPreviewIndex_   = 0;
     bool  taskbarClassRegistered_ = false;
-    int   taskbarRetryCount_     = 0;
     bool  taskbarRetryHideMain_  = false;
     MountMode    mountMode_       = MountMode::Normal;
     CapsuleStyle capsuleStyle_    = CapsuleStyle::Slim; // 胶囊外观

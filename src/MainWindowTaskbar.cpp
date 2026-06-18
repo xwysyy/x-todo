@@ -1,5 +1,5 @@
 // 任务栏嵌入状态条（MountMode::Taskbar）。
-// 参考 TrafficMonitor 的 Win11 路径：先创建 WS_POPUP 工具窗，再 SetParent 到
+// 参考 TrafficMonitor 的 Win11 路径：创建 WS_POPUP 工具窗，SetParent 到
 // Shell_TrayWnd / Shell_SecondaryTrayWnd，后续使用任务栏父窗口客户坐标布局。
 // 主窗口 hwnd_ 始终保持独立顶层 WS_POPUP，仅在状态条可见后隐藏。
 #include "MainWindow.h"
@@ -38,24 +38,17 @@ std::string WToUtf8(const std::wstring& w) {
     return s;
 }
 
-bool HasTaskbarParent(HWND child, HWND parent) {
-    if (!child || !parent || !IsWindow(child) || !IsWindow(parent)) return false;
-    return GetParent(child) == parent || GetAncestor(child, GA_PARENT) == parent;
-}
-
 bool AttachToTaskbarParent(HWND child, HWND parent) {
     if (!child || !parent || !IsWindow(child) || !IsWindow(parent)) return false;
-    if (HasTaskbarParent(child, parent)) return true;
 
     LONG_PTR style = GetWindowLongPtrW(child, GWL_STYLE);
-    style &= ~(WS_CHILD | WS_CAPTION | WS_THICKFRAME |
-               WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU);
-    style |= WS_POPUP | WS_CLIPSIBLINGS;
+    style &= ~WS_CHILD;
+    style |= WS_POPUP | WS_SYSMENU | WS_CLIPSIBLINGS;
     if (!SetWindowLongPtrChecked(child, GWL_STYLE, style)) return false;
 
     LONG_PTR ex = GetWindowLongPtrW(child, GWL_EXSTYLE);
-    ex |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
-    ex &= ~(WS_EX_APPWINDOW | WS_EX_TOPMOST);
+    ex |= WS_EX_TOOLWINDOW;
+    ex &= ~(WS_EX_APPWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE);
     if (!SetWindowLongPtrChecked(child, GWL_EXSTYLE, ex)) return false;
 
     SetLastError(ERROR_SUCCESS);
@@ -63,12 +56,10 @@ bool AttachToTaskbarParent(HWND child, HWND parent) {
     DWORD err = GetLastError();
     if (!oldParent && err != ERROR_SUCCESS) return false;
 
-    if (!HasTaskbarParent(child, parent)) return false;
-
     SetWindowPos(child, HWND_TOP, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE |
-                 SWP_SHOWWINDOW | SWP_FRAMECHANGED);
-    return HasTaskbarParent(child, parent);
+                 SWP_NOZORDER | SWP_FRAMECHANGED);
+    return true;
 }
 
 bool WindowRectInParentClient(HWND parent, HWND child, RECT& out) {
@@ -123,7 +114,9 @@ bool MainWindow::RegisterTaskbarBandClass() {
 }
 
 bool MainWindow::IsTaskbarBandAttached() const {
-    return HasTaskbarParent(taskbarHwnd_, taskbarParent_);
+    return taskbarInserted_ &&
+           taskbarHwnd_ && taskbarParent_ &&
+           IsWindow(taskbarHwnd_) && IsWindow(taskbarParent_);
 }
 
 bool MainWindow::IsTaskbarBandReady() const {
@@ -149,12 +142,14 @@ void MainWindow::TraceTaskbarBand(const wchar_t* tag) const {
 
     wchar_t buf[1024]{};
     swprintf_s(buf,
-        L"[X-TODO taskbar] %s parent=%p band=%p gp=%p ga=%p visible=%d "
-        L"style=%p ex=%p parentRect=(%ld,%ld,%ld,%ld) "
+        L"[X-TODO taskbar] %s parent=%p band=%p inserted=%d attachErr=%lu "
+        L"gp=%p ga=%p visible=%d style=%p ex=%p parentRect=(%ld,%ld,%ld,%ld) "
         L"bandRect=(%ld,%ld,%ld,%ld) client=(%ld,%ld)\n",
         tag ? tag : L"",
         reinterpret_cast<void*>(taskbarParent_),
         reinterpret_cast<void*>(taskbarHwnd_),
+        taskbarInserted_ ? 1 : 0,
+        taskbarAttachError_,
         reinterpret_cast<void*>(taskbarHwnd_ ? GetParent(taskbarHwnd_) : nullptr),
         reinterpret_cast<void*>(taskbarHwnd_ ? GetAncestor(taskbarHwnd_, GA_PARENT) : nullptr),
         taskbarHwnd_ ? IsWindowVisible(taskbarHwnd_) : 0,
@@ -188,7 +183,7 @@ TaskbarLayoutResult MainWindow::EnsureTaskbarBand() {
     HWND sec = nullptr;
     while ((sec = FindWindowExW(nullptr, sec, L"Shell_SecondaryTrayWnd", nullptr)) != nullptr)
         addHost(sec);
-    if (hosts.empty()) return TaskbarLayoutResult::Fatal;
+    if (hosts.empty()) return TaskbarLayoutResult::TransientUnavailable;
 
     // 选择规则：持久化显示器 > 主窗口所在 > 鼠标所在 > 主任务栏 > 首个有效。
     HWND host = nullptr;
@@ -217,24 +212,30 @@ TaskbarLayoutResult MainWindow::EnsureTaskbarBand() {
 
     taskbarParent_ = host;
     if (!taskbarHwnd_ || !IsWindow(taskbarHwnd_)) {
+        taskbarInserted_ = false;
+        taskbarAttachError_ = ERROR_SUCCESS;
         taskbarHwnd_ = CreateWindowExW(
-            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            WS_EX_TOOLWINDOW,
             kTaskbarBandClass, L"",
-            WS_POPUP | WS_CLIPSIBLINGS,
+            WS_POPUP | WS_SYSMENU | WS_CLIPSIBLINGS,
             0, 0, 10, 10,
-            nullptr, nullptr, GetModuleHandleW(nullptr), this);
+            hwnd_, nullptr, GetModuleHandleW(nullptr), this);
         if (!taskbarHwnd_) { taskbarParent_ = nullptr; return TaskbarLayoutResult::Fatal; }
         TraceTaskbarBand(L"after-create");
     }
     if (!AttachToTaskbarParent(taskbarHwnd_, taskbarParent_)) {
+        taskbarInserted_ = false;
+        taskbarAttachError_ = GetLastError();
         TraceTaskbarBand(L"attach-failed");
         DestroyTaskbarBand();
-        return TaskbarLayoutResult::Fatal;
+        return TaskbarLayoutResult::TransientUnavailable;
     }
+    taskbarInserted_ = true;
+    taskbarAttachError_ = ERROR_SUCCESS;
     TraceTaskbarBand(L"after-setparent");
 
     TaskbarLayoutResult r = LayoutTaskbarBand();
-    if (r == TaskbarLayoutResult::Fatal) { DestroyTaskbarBand(); return TaskbarLayoutResult::Fatal; }
+    if (r == TaskbarLayoutResult::Fatal) { DestroyTaskbarBand(); return TaskbarLayoutResult::TransientUnavailable; }
     TraceTaskbarBand(L"after-layout");
 
     for (auto& h : hosts) if (h.hwnd == host) { ui_.taskbarMonitor = WToUtf8(h.dev); break; }
@@ -243,7 +244,7 @@ TaskbarLayoutResult MainWindow::EnsureTaskbarBand() {
         KillTimer(hwnd_, kTaskbarRefreshTimerId);
         ShowWindow(taskbarHwnd_, SW_HIDE);
     } else {
-        ShowWindow(taskbarHwnd_, SW_SHOWNOACTIVATE);
+        ShowWindow(taskbarHwnd_, SW_SHOW);
         SetWindowPos(taskbarHwnd_, HWND_TOP, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         SetTimer(hwnd_, kTaskbarRefreshTimerId, 1000, nullptr);
@@ -255,9 +256,9 @@ TaskbarLayoutResult MainWindow::EnsureTaskbarBand() {
 
 TaskbarLayoutResult MainWindow::LayoutTaskbarBand() {
     if (!taskbarParent_ || !IsWindow(taskbarParent_) || !taskbarHwnd_ || !IsWindow(taskbarHwnd_))
-        return TaskbarLayoutResult::Fatal;
+        return TaskbarLayoutResult::TransientUnavailable;
     if (!IsTaskbarBandAttached())
-        return TaskbarLayoutResult::Fatal;
+        return TaskbarLayoutResult::TransientUnavailable;
     RECT pc{};
     if (!GetClientRect(taskbarParent_, &pc)) return TaskbarLayoutResult::TransientUnavailable;
     UINT dpi = GetDpiForWindow(taskbarParent_); if (!dpi) dpi = 96;
@@ -265,47 +266,50 @@ TaskbarLayoutResult MainWindow::LayoutTaskbarBand() {
     int parentW = pc.right - pc.left, parentH = pc.bottom - pc.top;
     bool horizontal = parentH <= parentW;
     int margin = SC(4);
+    if (parentW <= 2 * margin || parentH <= 2 * margin)
+        return TaskbarLayoutResult::TransientUnavailable;
 
     if (horizontal) {
-        int minW = SC(160), maxW = SC(520);
+        int minW = SC(96), maxW = SC(520);
         int maxAllowed = parentW - 2 * margin;
         if (maxAllowed > maxW) maxAllowed = maxW;
-        if (maxAllowed < minW) return TaskbarLayoutResult::Fatal;
+        if (maxAllowed < SC(48)) return TaskbarLayoutResult::TransientUnavailable;
         int maxH = parentH - 2 * margin;
-        if (maxH < SC(24)) return TaskbarLayoutResult::TransientUnavailable; // 自动隐藏 / 过渡
-        int h = ClampI(SC(32), SC(24), maxH);
+        if (maxH < SC(16)) return TaskbarLayoutResult::TransientUnavailable;
+        int h = maxH < SC(24) ? maxH : ClampI(SC(32), SC(24), maxH);
 
         HWND start = FindWindowExW(taskbarParent_, nullptr, L"Start", nullptr);
         RECT startRc{};
-        if (!start || !IsWindowVisible(start) ||
-            !WindowRectInParentClient(taskbarParent_, start, startRc))
-            return TaskbarLayoutResult::Fatal;
+        bool hasStart = start && WindowRectInParentClient(taskbarParent_, start, startRc) &&
+                        startRc.right > startRc.left && startRc.bottom > startRc.top;
 
-        int startH = startRc.bottom - startRc.top;
-        int y = (startH > 0)
+        int startH = hasStart ? (startRc.bottom - startRc.top) : 0;
+        int y = (hasStart && startH > 0)
               ? (startH - h) / 2 + (parentH - startH)
               : (parentH - h) / 2;
         y = ClampI(y, margin, parentH - margin - h);
 
-        int w = ClampI(SC(ui_.taskbarWidth), minW, maxAllowed);
+        int w = SC(ui_.taskbarWidth);
+        if (w < minW) w = minW;
+        if (w > maxAllowed) w = maxAllowed;
 
         bool requestLeft = ui_.taskbarDockT < 0.5;
         int x = 0;
         if (requestLeft && IsTaskbarCenterAligned()) {
-            x = startRc.left - w - SC(2);
-            if (x < margin) x = margin;
+            x = hasStart ? (startRc.left - w - SC(2)) : SC(2);
         } else {
             HWND notify = FindWindowExW(taskbarParent_, nullptr, L"TrayNotifyWnd", nullptr);
             RECT notifyRc{};
-            if (notify && IsWindowVisible(notify) &&
-                WindowRectInParentClient(taskbarParent_, notify, notifyRc)) {
+            if (notify &&
+                WindowRectInParentClient(taskbarParent_, notify, notifyRc) &&
+                notifyRc.right > notifyRc.left) {
                 x = notifyRc.left - w + SC(2);
             } else {
                 x = parentW - SC(88) - w;
             }
-            if (x + w > parentW - margin) x = parentW - margin - w;
-            if (x < margin) return TaskbarLayoutResult::Fatal;
         }
+        if (x + w > parentW - margin) x = parentW - margin - w;
+        if (x < margin) x = margin;
         taskbarBandRect_ = RECT{ x, y, x + w, y + h };
     } else {
         int w = parentW - 2 * margin;
@@ -404,8 +408,6 @@ void MainWindow::PaintTaskbarBand(HWND hwnd) {
 
 LRESULT MainWindow::TaskbarWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
-    case WM_MOUSEACTIVATE:
-        return MA_NOACTIVATE;
     case WM_ERASEBKGND:
         return 1;
     case WM_PAINT:
@@ -485,6 +487,8 @@ LRESULT MainWindow::TaskbarWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (hwnd == taskbarHwnd_) {
             taskbarHwnd_ = nullptr;
             taskbarParent_ = nullptr;
+            taskbarInserted_ = false;
+            taskbarAttachError_ = ERROR_SUCCESS;
             taskbarHover_ = taskbarPressed_ = taskbarDragging_ = false;
         }
         return 0;
@@ -501,6 +505,8 @@ void MainWindow::DestroyTaskbarBand() {
     }
     taskbarHwnd_ = nullptr;
     taskbarParent_ = nullptr;
+    taskbarInserted_ = false;
+    taskbarAttachError_ = ERROR_SUCCESS;
     taskbarHover_ = taskbarPressed_ = taskbarDragging_ = false;
 }
 
@@ -512,7 +518,6 @@ bool MainWindow::TryEnterTaskbarMode(bool /*userInitiated*/) {
     animActive_ = false;
     capsuleExpanded_ = false;
     TaskbarLayoutResult r = EnsureTaskbarBand();
-    if (r == TaskbarLayoutResult::Fatal) { DestroyTaskbarBand(); return false; }
     mountMode_ = MountMode::Taskbar;
     ui_.mountMode = "taskbar";
     if (r == TaskbarLayoutResult::Ok && IsTaskbarBandReady()) {
@@ -529,15 +534,12 @@ bool MainWindow::TryEnterTaskbarMode(bool /*userInitiated*/) {
 void MainWindow::LeaveTaskbarMode() {
     KillTimer(hwnd_, kTaskbarRetryTimerId);
     KillTimer(hwnd_, kTaskbarRefreshTimerId);
-    taskbarRetryCount_ = 0;
     taskbarRetryHideMain_ = false;
     DestroyTaskbarBand();
 }
 
 void MainWindow::ScheduleTaskbarRetry(bool hideMainOnOk) {
-    // 新原因触发的重试：清失败计数后定时，WM_TIMER 内连续重试才累计回退
     taskbarRetryHideMain_ = hideMainOnOk;
-    taskbarRetryCount_ = 0;
     SetTimer(hwnd_, kTaskbarRetryTimerId, 1000, nullptr);
 }
 
