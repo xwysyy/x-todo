@@ -36,6 +36,30 @@ jobs:
           path: build/MinSizeRel/x-todo.exe
           if-no-files-found: error
 
+  auto-tag:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+      - name: Create tag if VERSION changed
+        run: |
+          if ! git diff HEAD~1 --name-only | grep -q '^VERSION$'; then
+            echo "VERSION not changed, skip"
+            exit 0
+          fi
+          TAG="v$(cat VERSION | tr -d '[:space:]')"
+          if git ls-remote --tags origin "$TAG" | grep -q .; then
+            echo "Tag $TAG already exists, skip"
+            exit 0
+          fi
+          git tag "$TAG"
+          git push origin "$TAG"
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
