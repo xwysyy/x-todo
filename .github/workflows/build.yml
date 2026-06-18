@@ -79,7 +79,6 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             "dist/x-todo.exe#x-todo.exe" \
-            "dist/size-badge.json#size-badge.json" \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --generate-notes
@@ -94,8 +93,9 @@ jobs:
           if git show-ref --verify --quiet refs/remotes/origin/badges; then
             git switch --force-create badges origin/badges
           else
-            git switch --force-create badges
+            git switch --orphan badges
           fi
+          git rm -rf . >/dev/null 2>&1 || true
           cp dist/size-badge.json size-badge.json
           git add size-badge.json
           if git diff --cached --quiet; then
