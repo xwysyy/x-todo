@@ -126,37 +126,34 @@ through `BeginCapsulePress`. `63e1937`
 
 ## Taskbar Band
 
-### The taskbar band is a separate child window, not the main window
+### The taskbar band is a separate overlay, not a child of Explorer
 
-Symptom: attempts to reuse the main window's hit-testing, resize edges, or
-cursor for the embedded band would make the band resizable or show a resize
-cursor inside the taskbar, where neither makes sense.
+Symptom: a cross-process `WS_CHILD` under `Shell_TrayWnd` can be created
+successfully but still not appear on modern Windows taskbars. If the main
+window is then hidden, taskbar mode looks like it lost every visible entry.
 
-Root cause: the band is its own window. `EnsureTaskbarBand`
-(`src/MainWindowTaskbar.cpp`) creates `taskbarHwnd_` as a `WS_CHILD`
-(`WS_CHILD | WS_CLIPSIBLINGS`) window parented directly to Explorer's
-taskbar (`Shell_TrayWnd` or `Shell_SecondaryTrayWnd`), with its own
-`TaskbarWndProc` and a window class registered by `RegisterTaskbarBandClass`
-whose `hCursor` is `IDC_ARROW`. The main window `hwnd_` stays an independent
-top-level `WS_POPUP` and is merely hidden in taskbar mode; there is no
-`SetParent` of the main window. `TaskbarWndProc` handles its own painting,
-mouse, and drag, and it has no `WM_NCHITTEST` case and never consults
-`Theme::kResizeEdge`, so the band is never resizable and always shows the
-arrow cursor. Right-click reuses the shared menu: `WM_RBUTTONUP` in
-`TaskbarWndProc` calls `ShowTrayMenu` directly.
+Root cause: the band is its own window and should not depend on Explorer's
+child z-order. `EnsureTaskbarBand` (`src/MainWindowTaskbar.cpp`) creates
+`taskbarHwnd_` as a no-activate topmost tool `WS_POPUP`; `taskbarParent_`
+keeps tracking `Shell_TrayWnd` or `Shell_SecondaryTrayWnd` only for monitor
+selection, blocker discovery, and coordinate conversion. `LayoutTaskbarBand`
+still stores `taskbarBandRect_` in taskbar client coordinates, then converts
+the origin with `ClientToScreen` before `SetWindowPos`. The main window
+`hwnd_` remains an independent top-level `WS_POPUP` and is hidden only after
+the band layout result is `TaskbarLayoutResult::Ok`.
 
-On an Explorer restart the band is recreated, never reparented. The host
+On an Explorer restart the band is recreated as a fresh overlay. The host
 window is recomputed each time `EnsureTaskbarBand` runs, and if
-`taskbarHwnd_` already exists under a different host
+`taskbarHwnd_` already exists for a different host
 (`taskbarParent_ != host`), `DestroyTaskbarBand` runs before a fresh
-`CreateWindowExW` under the new host. The same destroy-and-recreate path is
-driven by the `TaskbarCreated` message and by `WM_DISPLAYCHANGE` in
-`MainWindow::WndProc`.
+`CreateWindowExW`. The same destroy-and-recreate path is driven by the
+`TaskbarCreated` message and by `WM_DISPLAYCHANGE` in `MainWindow::WndProc`.
 
-Rule: the band is a standalone `WS_CHILD` window with its own class, proc,
-and `IDC_ARROW` cursor; the main window is never reparented into the
-taskbar. Do not give the band `OnNcHitTest`, resize edges, or a resize
-cursor, and do not reparent on host change: destroy and recreate. `40fc9c3`
+Rule: the band is a standalone no-activate topmost tool popup with its own
+class, proc, and `IDC_ARROW` cursor. It is positioned from Explorer taskbar
+geometry but is not parented to Explorer. Do not give the band `OnNcHitTest`,
+resize edges, or a resize cursor. Do not hide the main window unless
+`EnsureTaskbarBand` returns `TaskbarLayoutResult::Ok`.
 
 ### `PaintTaskbarBand` must call the global `::FillRect`
 

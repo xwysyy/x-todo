@@ -709,7 +709,9 @@ void MainWindow::Show(bool expandCapsule) {
 
 void MainWindow::InitialShow() {
     // 冷启动：任务栏模式且状态条已就绪时只留状态条；绑定失败已回退 Normal 则正常显示。
-    if (mountMode_ == MountMode::Taskbar && taskbarHwnd_ && IsWindow(taskbarHwnd_)) return;
+    if (mountMode_ == MountMode::Taskbar &&
+        taskbarHwnd_ && IsWindow(taskbarHwnd_) && IsWindowVisible(taskbarHwnd_))
+        return;
     Show(false);
 }
 
@@ -731,8 +733,15 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == taskbarCreatedMsg_ && taskbarCreatedMsg_ != 0) {
         AddTrayIcon(); // Explorer 重启后重新登记托盘图标
         if (mountMode_ == MountMode::Taskbar) {
+            bool mainWasHidden = !IsWindowVisible(hwnd_);
             DestroyTaskbarBand();
-            if (!EnsureTaskbarBand()) ScheduleTaskbarRetry();
+            TaskbarLayoutResult r = EnsureTaskbarBand();
+            if (r == TaskbarLayoutResult::Ok) {
+                if (mainWasHidden) ShowWindow(hwnd_, SW_HIDE);
+            } else {
+                if (mainWasHidden) ShowWindow(hwnd_, SW_SHOW);
+                ScheduleTaskbarRetry(mainWasHidden);
+            }
         }
         return 0;
     }
@@ -759,8 +768,15 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
             UpdateLayeredState(); // 顺带刷新 alpha 与圆点区域
         }
         if (mountMode_ == MountMode::Taskbar) {
+            bool mainWasHidden = !IsWindowVisible(hwnd_);
             DestroyTaskbarBand();
-            if (!EnsureTaskbarBand()) ScheduleTaskbarRetry();
+            TaskbarLayoutResult r = EnsureTaskbarBand();
+            if (r == TaskbarLayoutResult::Ok) {
+                if (mainWasHidden) ShowWindow(hwnd_, SW_HIDE);
+            } else {
+                if (mainWasHidden) ShowWindow(hwnd_, SW_SHOW);
+                ScheduleTaskbarRetry(mainWasHidden);
+            }
         }
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
@@ -770,9 +786,14 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_SYSCOLORCHANGE:
     case WM_DWMCOLORIZATIONCOLORCHANGED:
         if (mountMode_ == MountMode::Taskbar) {
-            if (!taskbarHwnd_ || !IsWindow(taskbarHwnd_)) {
-                if (!EnsureTaskbarBand()) ScheduleTaskbarRetry();
-            } else { LayoutTaskbarBand(); InvalidateTaskbarBand(); }
+            bool mainWasHidden = !IsWindowVisible(hwnd_);
+            TaskbarLayoutResult r = EnsureTaskbarBand();
+            if (r == TaskbarLayoutResult::Ok) {
+                if (mainWasHidden) ShowWindow(hwnd_, SW_HIDE);
+            } else {
+                if (mainWasHidden) ShowWindow(hwnd_, SW_SHOW);
+                ScheduleTaskbarRetry(mainWasHidden);
+            }
         }
         break; // 落到 DefWindowProc，保留系统默认处理
 
@@ -796,7 +817,12 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_DPICHANGED: {
         dpi_ = HIWORD(wp);
-        if (mountMode_ == MountMode::Taskbar && !IsWindowVisible(hwnd_)) { LayoutTaskbarBand(); InvalidateTaskbarBand(); return 0; }
+        if (mountMode_ == MountMode::Taskbar && !IsWindowVisible(hwnd_)) {
+            TaskbarLayoutResult r = EnsureTaskbarBand();
+            if (r == TaskbarLayoutResult::Ok) ShowWindow(hwnd_, SW_HIDE);
+            else { ShowWindow(hwnd_, SW_SHOW); ScheduleTaskbarRetry(true); }
+            return 0;
+        }
         RECT target{};
         if (mountMode_ == MountMode::Capsule && !capsuleDragging_) {
             target = capsuleExpanded_ ? ExpandedTargetRect() : CapsuleTargetRect();
@@ -916,12 +942,17 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
         } else if (wp == kTaskbarRetryTimerId) {
             KillTimer(hwnd_, kTaskbarRetryTimerId);
             if (mountMode_ == MountMode::Taskbar) {
-                if (EnsureTaskbarBand()) {
+                TaskbarLayoutResult r = EnsureTaskbarBand();
+                if (r == TaskbarLayoutResult::Ok) {
                     taskbarRetryCount_ = 0; // 成功（含 transient 已自排重试）：清失败计数
+                    if (taskbarRetryHideMain_) ShowWindow(hwnd_, SW_HIDE);
+                    taskbarRetryHideMain_ = false;
                 } else if (taskbarRetryCount_++ < 3) {
+                    ShowWindow(hwnd_, SW_SHOW);
                     SetTimer(hwnd_, kTaskbarRetryTimerId, 1500, nullptr);
                 } else {
                     taskbarRetryCount_ = 0;
+                    taskbarRetryHideMain_ = false;
                     mountMode_ = MountMode::Normal; ui_.mountMode = "normal";
                     ShowWindow(hwnd_, SW_SHOW); ApplyMountMode();
                     MessageBoxW(hwnd_, T(Str::TaskbarEmbedFailed, lang_), L"x-todo", MB_OK | MB_ICONWARNING);
@@ -1171,15 +1202,20 @@ void MainWindow::ApplyMountMode() {
     capsuleExpanded_ = false;
 
     if (mountMode_ == MountMode::Taskbar) {
-        if (EnsureTaskbarBand()) {
+        TaskbarLayoutResult r = EnsureTaskbarBand();
+        if (r == TaskbarLayoutResult::Ok) {
             ShowWindow(hwnd_, SW_HIDE);
             return;
         }
-        // 绑定失败（含冷启动 mount=taskbar）：回退 Normal 并提示一次
-        DestroyTaskbarBand();
-        mountMode_ = MountMode::Normal;
-        ui_.mountMode = "normal";
-        MessageBoxW(hwnd_, T(Str::TaskbarEmbedFailed, lang_), L"x-todo", MB_OK | MB_ICONWARNING);
+        if (r == TaskbarLayoutResult::TransientUnavailable) {
+            ScheduleTaskbarRetry(true);
+        } else {
+            // 绑定失败（含冷启动 mount=taskbar）：回退 Normal 并提示一次
+            DestroyTaskbarBand();
+            mountMode_ = MountMode::Normal;
+            ui_.mountMode = "normal";
+            MessageBoxW(hwnd_, T(Str::TaskbarEmbedFailed, lang_), L"x-todo", MB_OK | MB_ICONWARNING);
+        }
     }
 
     if (mountMode_ == MountMode::Desktop) {
@@ -1192,7 +1228,7 @@ void MainWindow::ApplyMountMode() {
         SetWindowPos(hwnd_, HWND_TOPMOST, c.left, c.top,
                      c.right - c.left, c.bottom - c.top,
                      SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    } else { // Normal
+    } else { // Normal，或任务栏状态条暂不可用时显示完整窗口
         SetWindowPos(hwnd_, ui_.alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
                      geom_.x, geom_.y, geom_.w, geom_.h,
                      SWP_NOACTIVATE | SWP_SHOWWINDOW);

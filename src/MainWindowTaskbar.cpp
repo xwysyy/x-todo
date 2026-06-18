@@ -1,7 +1,7 @@
 // 任务栏嵌入状态条（MountMode::Taskbar）。
-// 专用子窗口 taskbarHwnd_ 通过带 parent 的 CreateWindowExW 直接挂到 Explorer
-// 任务栏窗口（Shell_TrayWnd / Shell_SecondaryTrayWnd）下，绝不 reparent。
-// 主窗口 hwnd_ 始终保持独立顶层 WS_POPUP，仅在任务栏模式下隐藏。
+// taskbarHwnd_ 使用贴住 Explorer 任务栏位置的 no-activate topmost popup。
+// taskbarParent_ 只用于定位、显示器选择和 Explorer 重启后的重建。
+// 主窗口 hwnd_ 始终保持独立顶层 WS_POPUP，仅在状态条可见后隐藏。
 #include "MainWindow.h"
 #include "Theme.h"
 #include "I18n.h"
@@ -104,8 +104,8 @@ bool MainWindow::RegisterTaskbarBandClass() {
     return true;
 }
 
-bool MainWindow::EnsureTaskbarBand() {
-    if (!RegisterTaskbarBandClass()) return false;
+TaskbarLayoutResult MainWindow::EnsureTaskbarBand() {
+    if (!RegisterTaskbarBandClass()) return TaskbarLayoutResult::Fatal;
 
     struct Host { HWND hwnd; HMONITOR mon; std::wstring dev; };
     std::vector<Host> hosts;
@@ -123,7 +123,7 @@ bool MainWindow::EnsureTaskbarBand() {
     HWND sec = nullptr;
     while ((sec = FindWindowExW(nullptr, sec, L"Shell_SecondaryTrayWnd", nullptr)) != nullptr)
         addHost(sec);
-    if (hosts.empty()) return false;
+    if (hosts.empty()) return TaskbarLayoutResult::Fatal;
 
     // 选择规则：持久化显示器 > 主窗口所在 > 鼠标所在 > 主任务栏 > 首个有效。
     HWND host = nullptr;
@@ -147,32 +147,34 @@ bool MainWindow::EnsureTaskbarBand() {
         for (auto& h : hosts) if (h.hwnd == primary) { host = h.hwnd; break; }
     if (!host) host = hosts.front().hwnd;
 
-    // 父窗口变化（含 Explorer 重启）：销毁旧 band 后重建，绝不 reparent。
+    // 任务栏 host 变化（含 Explorer 重启）：销毁旧 band 后重建。
     if (taskbarHwnd_ && taskbarParent_ != host) DestroyTaskbarBand();
 
     taskbarParent_ = host;
     if (!taskbarHwnd_ || !IsWindow(taskbarHwnd_)) {
         taskbarHwnd_ = CreateWindowExW(
-            0, kTaskbarBandClass, L"",
-            WS_CHILD | WS_CLIPSIBLINGS,
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
+            kTaskbarBandClass, L"",
+            WS_POPUP | WS_CLIPSIBLINGS,
             0, 0, 10, 10,
-            taskbarParent_, nullptr, GetModuleHandleW(nullptr), this);
-        if (!taskbarHwnd_) { taskbarParent_ = nullptr; return false; }
+            nullptr, nullptr, GetModuleHandleW(nullptr), this);
+        if (!taskbarHwnd_) { taskbarParent_ = nullptr; return TaskbarLayoutResult::Fatal; }
     }
 
     TaskbarLayoutResult r = LayoutTaskbarBand();
-    if (r == TaskbarLayoutResult::Fatal) { DestroyTaskbarBand(); return false; }
+    if (r == TaskbarLayoutResult::Fatal) { DestroyTaskbarBand(); return TaskbarLayoutResult::Fatal; }
 
     for (auto& h : hosts) if (h.hwnd == host) { ui_.taskbarMonitor = WToUtf8(h.dev); break; }
     if (r == TaskbarLayoutResult::TransientUnavailable) {
-        // 自动隐藏 / Explorer 过渡：不显示未布局的 band，延迟重布局（保留 Taskbar 模式，不回退）
+        // 自动隐藏 / Explorer 过渡：不显示未布局的 band，由调用方决定是否重试。
         ShowWindow(taskbarHwnd_, SW_HIDE);
-        SetTimer(hwnd_, kTaskbarRetryTimerId, 1000, nullptr);
     } else {
-        ShowWindow(taskbarHwnd_, SW_SHOWNA);
+        ShowWindow(taskbarHwnd_, SW_SHOWNOACTIVATE);
+        SetWindowPos(taskbarHwnd_, HWND_TOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
     InvalidateTaskbarBand();
-    return true;
+    return r;
 }
 
 TaskbarLayoutResult MainWindow::LayoutTaskbarBand() {
@@ -180,6 +182,8 @@ TaskbarLayoutResult MainWindow::LayoutTaskbarBand() {
         return TaskbarLayoutResult::Fatal;
     RECT pc{};
     if (!GetClientRect(taskbarParent_, &pc)) return TaskbarLayoutResult::TransientUnavailable;
+    POINT origin{ 0, 0 };
+    if (!ClientToScreen(taskbarParent_, &origin)) return TaskbarLayoutResult::TransientUnavailable;
     UINT dpi = GetDpiForWindow(taskbarParent_); if (!dpi) dpi = 96;
     auto SC = [&](int v) { return MulDiv(v, dpi, 96); };
     int parentW = pc.right - pc.left, parentH = pc.bottom - pc.top;
@@ -214,11 +218,12 @@ TaskbarLayoutResult MainWindow::LayoutTaskbarBand() {
         int y = ClampI(centerY - h / 2, margin, parentH - margin - h);
         taskbarBandRect_ = RECT{ margin, y, margin + w, y + h };
     }
-    SetWindowPos(taskbarHwnd_, HWND_TOP,
-        taskbarBandRect_.left, taskbarBandRect_.top,
+    SetWindowPos(taskbarHwnd_, HWND_TOPMOST,
+        origin.x + taskbarBandRect_.left,
+        origin.y + taskbarBandRect_.top,
         taskbarBandRect_.right - taskbarBandRect_.left,
         taskbarBandRect_.bottom - taskbarBandRect_.top,
-        SWP_NOACTIVATE);
+        SWP_NOACTIVATE | SWP_SHOWWINDOW);
     return TaskbarLayoutResult::Ok;
 }
 
@@ -283,6 +288,8 @@ void MainWindow::PaintTaskbarBand(HWND hwnd) {
 
 LRESULT MainWindow::TaskbarWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
+    case WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE;
     case WM_ERASEBKGND:
         return 1;
     case WM_PAINT:
@@ -387,20 +394,30 @@ bool MainWindow::TryEnterTaskbarMode(bool /*userInitiated*/) {
     KillTimer(hwnd_, kAnimTimerId);
     animActive_ = false;
     capsuleExpanded_ = false;
-    if (!EnsureTaskbarBand()) { DestroyTaskbarBand(); return false; }
+    TaskbarLayoutResult r = EnsureTaskbarBand();
+    if (r == TaskbarLayoutResult::Fatal) { DestroyTaskbarBand(); return false; }
     mountMode_ = MountMode::Taskbar;
     ui_.mountMode = "taskbar";
-    ShowWindow(hwnd_, SW_HIDE);
+    if (r == TaskbarLayoutResult::Ok) {
+        ShowWindow(hwnd_, SW_HIDE);
+    } else {
+        ShowWindow(hwnd_, SW_SHOW);
+        ScheduleTaskbarRetry(true);
+    }
     ScheduleSave();
     return true;
 }
 
 void MainWindow::LeaveTaskbarMode() {
+    KillTimer(hwnd_, kTaskbarRetryTimerId);
+    taskbarRetryCount_ = 0;
+    taskbarRetryHideMain_ = false;
     DestroyTaskbarBand();
 }
 
-void MainWindow::ScheduleTaskbarRetry() {
+void MainWindow::ScheduleTaskbarRetry(bool hideMainOnOk) {
     // 新原因触发的重试：清失败计数后定时，WM_TIMER 内连续重试才累计回退
+    taskbarRetryHideMain_ = hideMainOnOk;
     taskbarRetryCount_ = 0;
     SetTimer(hwnd_, kTaskbarRetryTimerId, 1000, nullptr);
 }

@@ -113,7 +113,7 @@ private:
     bool        RegisterTaskbarBandClass();
     bool        TryEnterTaskbarMode(bool userInitiated);
     void        LeaveTaskbarMode();
-    bool        EnsureTaskbarBand();
+    TaskbarLayoutResult EnsureTaskbarBand();
     void        DestroyTaskbarBand();
     TaskbarLayoutResult LayoutTaskbarBand();
     void        PaintTaskbarBand(HWND hwnd);
@@ -123,7 +123,7 @@ private:
     void        InvalidateTaskbarBand();
     void        ClampTaskbarPreviewIndex();
     void        OnModelOrUiChangedForTaskbarBand();
-    void        ScheduleTaskbarRetry();
+    void        ScheduleTaskbarRetry(bool hideMainOnOk = false);
     void        SetCapsuleStyle(CapsuleStyle s);
     void        StartCapsuleAnim(bool expand);
     void        OnAnimTick();
@@ -221,6 +221,7 @@ private:
     int   taskbarPreviewIndex_   = 0;
     bool  taskbarClassRegistered_ = false;
     int   taskbarRetryCount_     = 0;
+    bool  taskbarRetryHideMain_  = false;
     MountMode    mountMode_       = MountMode::Normal;
     CapsuleStyle capsuleStyle_    = CapsuleStyle::Slim; // 胶囊外观
     bool      capsuleExpanded_ = false;  // 胶囊形态下是否已滑出
