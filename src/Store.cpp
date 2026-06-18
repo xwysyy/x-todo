@@ -34,7 +34,8 @@ bool IsTaskbarStrategy(const std::wstring& v) {
            v == L"child_traynotify" ||
            v == L"popup_taskhost" ||
            v == L"topmost_overlay" ||
-           v == L"appbar_edge";
+           v == L"appbar_edge" ||
+           v == L"trafficmonitor_layered_shell";
 }
 
 // 把换行 / 制表 / 反斜杠转义，保证一条目占一行

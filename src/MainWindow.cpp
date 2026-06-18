@@ -423,7 +423,8 @@ constexpr TaskbarStrategyMenuEntry kTaskbarStrategyMenu[] = {
     { 135, "child_traynotify",      L"TB6 child TrayNotify",     L"TB6 child TrayNotify" },
     { 136, "popup_taskhost",        L"TB7 popup task host",      L"TB7 popup task host" },
     { 137, "topmost_overlay",       L"TB8 topmost overlay",      L"TB8 topmost overlay" },
-    { 138, "appbar_edge",           L"TB9 appbar edge",          L"TB9 appbar edge" }
+    { 138, "appbar_edge",           L"TB9 appbar edge",          L"TB9 appbar edge" },
+    { 139, "trafficmonitor_layered_shell", L"TB10 TrafficMonitor layered shell", L"TB10 TrafficMonitor layered shell" }
 };
 
 const TaskbarStrategyMenuEntry* FindTaskbarStrategyCommand(UINT cmd) {

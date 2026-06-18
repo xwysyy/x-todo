@@ -27,7 +27,8 @@ enum class TaskbarEmbedStrategy {
     ChildTrayNotify,
     PopupTaskHost,
     TopmostOverlay,
-    AppbarEdge
+    AppbarEdge,
+    TrafficMonitorLayeredShell
 };
 
 struct TaskbarStrategyDef {
@@ -45,41 +46,42 @@ constexpr TaskbarStrategyDef kTaskbarStrategies[] = {
     { TaskbarEmbedStrategy::ChildTrayNotify, "child_traynotify", L"TB6" },
     { TaskbarEmbedStrategy::PopupTaskHost, "popup_taskhost", L"TB7" },
     { TaskbarEmbedStrategy::TopmostOverlay, "topmost_overlay", L"TB8" },
-    { TaskbarEmbedStrategy::AppbarEdge, "appbar_edge", L"TB9" }
+    { TaskbarEmbedStrategy::AppbarEdge, "appbar_edge", L"TB9" },
+    { TaskbarEmbedStrategy::TrafficMonitorLayeredShell, "trafficmonitor_layered_shell", L"TB10" }
 };
 
 TaskbarEmbedStrategy TaskbarStrategyFromId(const std::string& id) {
     for (const auto& def : kTaskbarStrategies) {
         if (id == def.id) return def.strategy;
     }
-    return TaskbarEmbedStrategy::PopupShellNoOwner;
+    return TaskbarEmbedStrategy::TrafficMonitorLayeredShell;
 }
 
 TaskbarEmbedStrategy TaskbarStrategyFromIndex(int index) {
     if (index >= 0 && index < (int)(sizeof(kTaskbarStrategies) / sizeof(kTaskbarStrategies[0])))
         return kTaskbarStrategies[index].strategy;
-    return TaskbarEmbedStrategy::PopupShellNoOwner;
+    return TaskbarEmbedStrategy::TrafficMonitorLayeredShell;
 }
 
 const char* TaskbarStrategyId(TaskbarEmbedStrategy strategy) {
     for (const auto& def : kTaskbarStrategies) {
         if (def.strategy == strategy) return def.id;
     }
-    return kTaskbarStrategies[0].id;
+    return "trafficmonitor_layered_shell";
 }
 
 const wchar_t* TaskbarStrategyTag(TaskbarEmbedStrategy strategy) {
     for (const auto& def : kTaskbarStrategies) {
         if (def.strategy == strategy) return def.tag;
     }
-    return kTaskbarStrategies[0].tag;
+    return L"TB10";
 }
 
 int TaskbarStrategyIndex(TaskbarEmbedStrategy strategy) {
     for (int i = 0; i < (int)(sizeof(kTaskbarStrategies) / sizeof(kTaskbarStrategies[0])); ++i) {
         if (kTaskbarStrategies[i].strategy == strategy) return i;
     }
-    return 0;
+    return (int)(sizeof(kTaskbarStrategies) / sizeof(kTaskbarStrategies[0])) - 1;
 }
 
 bool StrategyUsesSetParent(TaskbarEmbedStrategy s) {
@@ -88,7 +90,8 @@ bool StrategyUsesSetParent(TaskbarEmbedStrategy s) {
            s == TaskbarEmbedStrategy::ChildShellSetParent ||
            s == TaskbarEmbedStrategy::PopupTrayNotify ||
            s == TaskbarEmbedStrategy::ChildTrayNotify ||
-           s == TaskbarEmbedStrategy::PopupTaskHost;
+           s == TaskbarEmbedStrategy::PopupTaskHost ||
+           s == TaskbarEmbedStrategy::TrafficMonitorLayeredShell;
 }
 
 bool StrategyUsesTrueChild(TaskbarEmbedStrategy s) {
@@ -100,6 +103,10 @@ bool StrategyUsesTrueChild(TaskbarEmbedStrategy s) {
 bool StrategyUsesScreenCoords(TaskbarEmbedStrategy s) {
     return s == TaskbarEmbedStrategy::TopmostOverlay ||
            s == TaskbarEmbedStrategy::AppbarEdge;
+}
+
+bool StrategyUsesLayeredRender(TaskbarEmbedStrategy s) {
+    return s == TaskbarEmbedStrategy::TrafficMonitorLayeredShell;
 }
 
 bool SetWindowLongPtrChecked(HWND hwnd, int index, LONG_PTR value) {
@@ -139,6 +146,10 @@ bool AttachToTaskbarParent(HWND child, HWND parent, TaskbarEmbedStrategy strateg
 
     LONG_PTR ex = GetWindowLongPtrW(child, GWL_EXSTYLE);
     ex |= WS_EX_TOOLWINDOW;
+    if (StrategyUsesLayeredRender(strategy))
+        ex |= WS_EX_LAYERED;
+    else
+        ex &= ~WS_EX_LAYERED;
     ex &= ~(WS_EX_APPWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE);
     if (!SetWindowLongPtrChecked(child, GWL_EXSTYLE, ex)) return false;
 
@@ -280,7 +291,10 @@ bool MainWindow::IsTaskbarBandReady() const {
     if (!IsWindowVisible(taskbarHwnd_)) return false;
     RECT wr{};
     if (!GetWindowRect(taskbarHwnd_, &wr)) return false;
-    return wr.right > wr.left && wr.bottom > wr.top;
+    if (wr.right <= wr.left || wr.bottom <= wr.top) return false;
+    TaskbarEmbedStrategy strategy = TaskbarStrategyFromIndex(taskbarActiveStrategy_);
+    if (StrategyUsesLayeredRender(strategy) && !taskbarLayeredReady_) return false;
+    return true;
 }
 
 void MainWindow::TraceTaskbarBand(const wchar_t* tag) const {
@@ -380,6 +394,7 @@ TaskbarLayoutResult MainWindow::EnsureTaskbarBand() {
     taskbarActiveStrategy_ = strategyIndex;
     if (!taskbarHwnd_ || !IsWindow(taskbarHwnd_)) {
         taskbarInserted_ = false;
+        taskbarLayeredReady_ = false;
         taskbarAttachError_ = ERROR_SUCCESS;
         DWORD exStyle = WS_EX_TOOLWINDOW;
         DWORD style = WS_POPUP | WS_SYSMENU | WS_CLIPSIBLINGS;
@@ -387,6 +402,10 @@ TaskbarLayoutResult MainWindow::EnsureTaskbarBand() {
 
         if (strategy == TaskbarEmbedStrategy::PopupShellOwner)
             createParent = hwnd_;
+        if (strategy == TaskbarEmbedStrategy::TrafficMonitorLayeredShell) {
+            exStyle |= WS_EX_LAYERED;
+            createParent = hwnd_;
+        }
         if (strategy == TaskbarEmbedStrategy::CreateChildShell) {
             style = WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
             createParent = taskbarParent_;
@@ -433,6 +452,12 @@ TaskbarLayoutResult MainWindow::EnsureTaskbarBand() {
     TaskbarLayoutResult r = LayoutTaskbarBand();
     if (r == TaskbarLayoutResult::Fatal) { DestroyTaskbarBand(); return TaskbarLayoutResult::TransientUnavailable; }
     TraceTaskbarBand(L"after-layout");
+    if (r == TaskbarLayoutResult::Ok && StrategyUsesLayeredRender(strategy) &&
+        !RenderLayeredTaskbarBand()) {
+        TraceTaskbarBand(L"layered-render-failed");
+        ShowWindow(taskbarHwnd_, SW_HIDE);
+        return TaskbarLayoutResult::TransientUnavailable;
+    }
 
     for (auto& h : hosts) if (h.hwnd == shellHost) { ui_.taskbarMonitor = WToUtf8(h.dev); break; }
     if (r == TaskbarLayoutResult::TransientUnavailable) {
@@ -446,6 +471,8 @@ TaskbarLayoutResult MainWindow::EnsureTaskbarBand() {
         ShowWindow(taskbarHwnd_, showCmd);
         SetWindowPos(taskbarHwnd_, z, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        if (StrategyUsesLayeredRender(strategy))
+            RenderLayeredTaskbarBand();
         SetTimer(hwnd_, kTaskbarRefreshTimerId, 1000, nullptr);
         TraceTaskbarBand(L"after-show");
     }
@@ -606,17 +633,10 @@ TaskbarLayoutResult MainWindow::LayoutTaskbarBand() {
     return TaskbarLayoutResult::Ok;
 }
 
-void MainWindow::PaintTaskbarBand(HWND hwnd) {
-    TraceTaskbarBand(L"paint");
-
-    PAINTSTRUCT ps;
-    HDC hdc = BeginPaint(hwnd, &ps);
-    RECT rc; GetClientRect(hwnd, &rc);
-    int w = rc.right, h = rc.bottom;
-
-    HDC mem = CreateCompatibleDC(hdc);
-    HBITMAP bmp = CreateCompatibleBitmap(hdc, w, h);
-    HBITMAP oldBmp = (HBITMAP)SelectObject(mem, bmp);
+void MainWindow::DrawTaskbarBandContents(HDC mem, const RECT& rc) {
+    int w = rc.right - rc.left;
+    int h = rc.bottom - rc.top;
+    if (!mem || w <= 0 || h <= 0) return;
 
     // 整块填充：覆盖所有像素，避免父任务栏重绘后残影。
     HBRUSH bg = CreateSolidBrush(RGB(28, 28, 30));
@@ -648,7 +668,8 @@ void MainWindow::PaintTaskbarBand(HWND hwnd) {
         text = prefix + T(Str::TaskbarAllDone, lang_);
     }
 
-    UINT dpi = GetDpiForWindow(taskbarParent_ ? taskbarParent_ : hwnd); if (!dpi) dpi = 96;
+    UINT dpi = GetDpiForWindow(taskbarParent_ ? taskbarParent_ : (taskbarHwnd_ ? taskbarHwnd_ : hwnd_));
+    if (!dpi) dpi = 96;
     int fs = (h < MulDiv(36, dpi, 96)) ? 12 : 13;
     LOGFONTW lf{};
     lf.lfHeight = -MulDiv(fs, dpi, 72);
@@ -674,12 +695,125 @@ void MainWindow::PaintTaskbarBand(HWND hwnd) {
     SelectObject(mem, oldBrush);
     DeleteObject(dbgPen);
 #endif
+}
+
+void MainWindow::PaintTaskbarBand(HWND hwnd) {
+    TraceTaskbarBand(L"paint");
+
+    TaskbarEmbedStrategy strategy = TaskbarStrategyFromIndex(taskbarActiveStrategy_);
+    if (StrategyUsesLayeredRender(strategy)) {
+        PAINTSTRUCT ps;
+        BeginPaint(hwnd, &ps);
+        EndPaint(hwnd, &ps);
+        RenderLayeredTaskbarBand();
+        return;
+    }
+
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(hwnd, &ps);
+    RECT rc; GetClientRect(hwnd, &rc);
+    int w = rc.right - rc.left, h = rc.bottom - rc.top;
+    if (w <= 0 || h <= 0) {
+        EndPaint(hwnd, &ps);
+        return;
+    }
+
+    HDC mem = CreateCompatibleDC(hdc);
+    if (!mem) {
+        EndPaint(hwnd, &ps);
+        return;
+    }
+    HBITMAP bmp = CreateCompatibleBitmap(hdc, w, h);
+    if (!bmp) {
+        DeleteDC(mem);
+        EndPaint(hwnd, &ps);
+        return;
+    }
+    HBITMAP oldBmp = (HBITMAP)SelectObject(mem, bmp);
+
+    DrawTaskbarBandContents(mem, rc);
 
     BitBlt(hdc, 0, 0, w, h, mem, 0, 0, SRCCOPY);
     SelectObject(mem, oldBmp);
     DeleteObject(bmp);
     DeleteDC(mem);
     EndPaint(hwnd, &ps);
+}
+
+bool MainWindow::RenderLayeredTaskbarBand() {
+    taskbarLayeredReady_ = false;
+    if (!taskbarHwnd_ || !IsWindow(taskbarHwnd_)) return false;
+
+    RECT rc{};
+    if (!GetClientRect(taskbarHwnd_, &rc)) return false;
+    int w = rc.right - rc.left;
+    int h = rc.bottom - rc.top;
+    if (w <= 0 || h <= 0) return false;
+
+    HDC screen = GetDC(nullptr);
+    if (!screen) return false;
+    HDC mem = CreateCompatibleDC(screen);
+    if (!mem) {
+        ReleaseDC(nullptr, screen);
+        return false;
+    }
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = w;
+    bmi.bmiHeader.biHeight = -h;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = nullptr;
+    HBITMAP dib = CreateDIBSection(screen, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (!dib || !bits) {
+        if (dib) DeleteObject(dib);
+        DeleteDC(mem);
+        ReleaseDC(nullptr, screen);
+        return false;
+    }
+
+    HBITMAP oldBmp = (HBITMAP)SelectObject(mem, dib);
+    RECT drawRc{ 0, 0, w, h };
+    DrawTaskbarBandContents(mem, drawRc);
+
+    BYTE* px = static_cast<BYTE*>(bits);
+    int pixelCount = w * h;
+    for (int i = 0; i < pixelCount; ++i)
+        px[i * 4 + 3] = 255;
+
+    POINT src{ 0, 0 };
+    SIZE size{ w, h };
+    BLENDFUNCTION blend{};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+
+    UPDATELAYEREDWINDOWINFO info{};
+    info.cbSize = sizeof(info);
+    info.hdcDst = screen;
+    info.psize = &size;
+    info.hdcSrc = mem;
+    info.pptSrc = &src;
+    info.pblend = &blend;
+    info.dwFlags = ULW_ALPHA;
+
+    SetLastError(ERROR_SUCCESS);
+    BOOL ok = UpdateLayeredWindowIndirect(taskbarHwnd_, &info);
+    if (ok) {
+        taskbarLayeredReady_ = true;
+        taskbarAttachError_ = ERROR_SUCCESS;
+    } else {
+        taskbarAttachError_ = GetLastError();
+    }
+
+    SelectObject(mem, oldBmp);
+    DeleteObject(dib);
+    DeleteDC(mem);
+    ReleaseDC(nullptr, screen);
+    return ok != FALSE;
 }
 
 LRESULT MainWindow::TaskbarWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -694,7 +828,7 @@ LRESULT MainWindow::TaskbarWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             taskbarHover_ = true;
             TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd, 0 };
             TrackMouseEvent(&tme);
-            InvalidateRect(hwnd, nullptr, FALSE);
+            InvalidateTaskbarBand();
         }
         if (taskbarPressed_) {
             POINT sp; GetCursorPos(&sp);
@@ -720,7 +854,7 @@ LRESULT MainWindow::TaskbarWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     case WM_MOUSELEAVE:
         taskbarHover_ = false;
-        InvalidateRect(hwnd, nullptr, FALSE);
+        InvalidateTaskbarBand();
         return 0;
     case WM_LBUTTONDOWN:
         SetCapture(hwnd);
@@ -728,14 +862,14 @@ LRESULT MainWindow::TaskbarWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         taskbarDragging_ = false;
         GetCursorPos(&taskbarPressScreen_);
         taskbarPressOffset_ = POINT{ GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
-        InvalidateRect(hwnd, nullptr, FALSE);
+        InvalidateTaskbarBand();
         return 0;
     case WM_LBUTTONUP: {
         bool wasDrag = taskbarDragging_;
         if (GetCapture() == hwnd) ReleaseCapture();
         taskbarPressed_ = false;
         taskbarDragging_ = false;
-        InvalidateRect(hwnd, nullptr, FALSE);
+        InvalidateTaskbarBand();
         if (wasDrag) { CaptureTaskbarDockFromBand(); ScheduleSave(); }
         else ShowFromTaskbarBand(); // 未拖动才打开完整窗口
         return 0;
@@ -753,11 +887,11 @@ LRESULT MainWindow::TaskbarWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_DPICHANGED_BEFOREPARENT:
     case WM_DPICHANGED_AFTERPARENT:
         LayoutTaskbarBand();
-        InvalidateRect(hwnd, nullptr, FALSE);
+        InvalidateTaskbarBand();
         return 0;
     case WM_THEMECHANGED:
     case WM_SYSCOLORCHANGE:
-        InvalidateRect(hwnd, nullptr, FALSE);
+        InvalidateTaskbarBand();
         return 0;
     case WM_NCDESTROY:
         if (hwnd == taskbarHwnd_) {
@@ -767,6 +901,7 @@ LRESULT MainWindow::TaskbarWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             taskbarAttachError_ = ERROR_SUCCESS;
             taskbarAppbarRegistered_ = false;
             taskbarActiveStrategy_ = -1;
+            taskbarLayeredReady_ = false;
             taskbarHover_ = taskbarPressed_ = taskbarDragging_ = false;
         }
         return 0;
@@ -787,6 +922,7 @@ void MainWindow::DestroyTaskbarBand() {
     taskbarInserted_ = false;
     taskbarAttachError_ = ERROR_SUCCESS;
     taskbarActiveStrategy_ = -1;
+    taskbarLayeredReady_ = false;
     taskbarHover_ = taskbarPressed_ = taskbarDragging_ = false;
 }
 
@@ -899,7 +1035,11 @@ void MainWindow::CaptureTaskbarDockFromBand() {
 }
 
 void MainWindow::InvalidateTaskbarBand() {
-    if (taskbarHwnd_ && IsWindow(taskbarHwnd_))
+    if (!taskbarHwnd_ || !IsWindow(taskbarHwnd_)) return;
+    TaskbarEmbedStrategy strategy = TaskbarStrategyFromIndex(taskbarActiveStrategy_);
+    if (StrategyUsesLayeredRender(strategy))
+        RenderLayeredTaskbarBand();
+    else
         InvalidateRect(taskbarHwnd_, nullptr, FALSE);
 }
 

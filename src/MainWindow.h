@@ -117,7 +117,9 @@ private:
     TaskbarLayoutResult EnsureTaskbarBand();
     void        DestroyTaskbarBand();
     TaskbarLayoutResult LayoutTaskbarBand();
+    void        DrawTaskbarBandContents(HDC hdc, const RECT& rc);
     void        PaintTaskbarBand(HWND hwnd);
+    bool        RenderLayeredTaskbarBand();
     void        ShowFromTaskbarBand();
     void        CompleteTaskbarPreviewItem();
     void        CaptureTaskbarDockFromBand();
@@ -220,6 +222,7 @@ private:
     DWORD taskbarAttachError_    = ERROR_SUCCESS;
     bool  taskbarAppbarRegistered_ = false;
     int   taskbarActiveStrategy_ = -1;
+    bool  taskbarLayeredReady_    = false;
     bool  taskbarHover_          = false;
     bool  taskbarPressed_        = false;
     bool  taskbarDragging_       = false;
