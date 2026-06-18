@@ -25,6 +25,18 @@ std::string WideToUtf8(const std::wstring& w) {
     return s;
 }
 
+bool IsTaskbarStrategy(const std::wstring& v) {
+    return v == L"popup_shell_noowner" ||
+           v == L"popup_shell_owner" ||
+           v == L"child_shell_setparent" ||
+           v == L"create_child_shell" ||
+           v == L"popup_traynotify" ||
+           v == L"child_traynotify" ||
+           v == L"popup_taskhost" ||
+           v == L"topmost_overlay" ||
+           v == L"appbar_edge";
+}
+
 // 把换行 / 制表 / 反斜杠转义，保证一条目占一行
 std::wstring Escape(const std::wstring& in) {
     std::wstring out;
@@ -230,6 +242,13 @@ LoadResult Store::Load(TodoModel& model, WindowGeometry& geom, UiState& ui) {
                 std::wstring v = line.substr(twd + wcslen(L"taskbar_width="));
                 ui.taskbarWidth = std::clamp((int)wcstol(v.c_str(), nullptr, 10), 160, 520);
             }
+            size_t tst = line.find(L"taskbar_strategy=");
+            if (tst != std::wstring::npos) {
+                std::wstring v = line.substr(tst + wcslen(L"taskbar_strategy="));
+                while (!v.empty() && (v.back() == L' ' || v.back() == L'\r')) v.pop_back();
+                if (IsTaskbarStrategy(v))
+                    ui.taskbarStrategy = std::string(v.begin(), v.end());
+            }
         }
     }
     model.ReplaceAll(std::move(items));
@@ -275,6 +294,7 @@ bool Store::Save(const TodoModel& model, const WindowGeometry& geom, const UiSta
         text += tb;
     }
     text += L"ui taskbar_width=" + std::to_wstring(ui.taskbarWidth) + L"\n";
+    text += L"ui taskbar_strategy=" + std::wstring(ui.taskbarStrategy.begin(), ui.taskbarStrategy.end()) + L"\n";
     for (const auto& it : model.Items()) {
         text += L"item ";
         text += it.done ? L"1 " : L"0 ";

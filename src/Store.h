@@ -21,6 +21,7 @@ struct UiState {
     std::string taskbarMonitor  = "";      // 任务栏所在显示器 szDevice（UTF-8）
     double      taskbarDockT    = 0.18;    // 沿任务栏长边的归一化位置 0..1
     int         taskbarWidth    = 320;     // 水平状态条宽度，逻辑像素
+    std::string taskbarStrategy = "popup_shell_noowner";
 };
 
 // 加载结果：区分"文件不存在"（可安全空启动）与"存在但读失败"（须防止覆盖丢失）。

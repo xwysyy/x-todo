@@ -14,8 +14,93 @@
 namespace {
 
 constexpr wchar_t kTaskbarBandClass[] = L"XTodoTaskbarBandClass";
+constexpr UINT kTaskbarAppbarCallbackMsg = WM_APP + 64;
 
 int ClampI(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+enum class TaskbarEmbedStrategy {
+    PopupShellNoOwner = 0,
+    PopupShellOwner,
+    ChildShellSetParent,
+    CreateChildShell,
+    PopupTrayNotify,
+    ChildTrayNotify,
+    PopupTaskHost,
+    TopmostOverlay,
+    AppbarEdge
+};
+
+struct TaskbarStrategyDef {
+    TaskbarEmbedStrategy strategy;
+    const char* id;
+    const wchar_t* tag;
+};
+
+constexpr TaskbarStrategyDef kTaskbarStrategies[] = {
+    { TaskbarEmbedStrategy::PopupShellNoOwner, "popup_shell_noowner", L"TB1" },
+    { TaskbarEmbedStrategy::PopupShellOwner, "popup_shell_owner", L"TB2" },
+    { TaskbarEmbedStrategy::ChildShellSetParent, "child_shell_setparent", L"TB3" },
+    { TaskbarEmbedStrategy::CreateChildShell, "create_child_shell", L"TB4" },
+    { TaskbarEmbedStrategy::PopupTrayNotify, "popup_traynotify", L"TB5" },
+    { TaskbarEmbedStrategy::ChildTrayNotify, "child_traynotify", L"TB6" },
+    { TaskbarEmbedStrategy::PopupTaskHost, "popup_taskhost", L"TB7" },
+    { TaskbarEmbedStrategy::TopmostOverlay, "topmost_overlay", L"TB8" },
+    { TaskbarEmbedStrategy::AppbarEdge, "appbar_edge", L"TB9" }
+};
+
+TaskbarEmbedStrategy TaskbarStrategyFromId(const std::string& id) {
+    for (const auto& def : kTaskbarStrategies) {
+        if (id == def.id) return def.strategy;
+    }
+    return TaskbarEmbedStrategy::PopupShellNoOwner;
+}
+
+TaskbarEmbedStrategy TaskbarStrategyFromIndex(int index) {
+    if (index >= 0 && index < (int)(sizeof(kTaskbarStrategies) / sizeof(kTaskbarStrategies[0])))
+        return kTaskbarStrategies[index].strategy;
+    return TaskbarEmbedStrategy::PopupShellNoOwner;
+}
+
+const char* TaskbarStrategyId(TaskbarEmbedStrategy strategy) {
+    for (const auto& def : kTaskbarStrategies) {
+        if (def.strategy == strategy) return def.id;
+    }
+    return kTaskbarStrategies[0].id;
+}
+
+const wchar_t* TaskbarStrategyTag(TaskbarEmbedStrategy strategy) {
+    for (const auto& def : kTaskbarStrategies) {
+        if (def.strategy == strategy) return def.tag;
+    }
+    return kTaskbarStrategies[0].tag;
+}
+
+int TaskbarStrategyIndex(TaskbarEmbedStrategy strategy) {
+    for (int i = 0; i < (int)(sizeof(kTaskbarStrategies) / sizeof(kTaskbarStrategies[0])); ++i) {
+        if (kTaskbarStrategies[i].strategy == strategy) return i;
+    }
+    return 0;
+}
+
+bool StrategyUsesSetParent(TaskbarEmbedStrategy s) {
+    return s == TaskbarEmbedStrategy::PopupShellNoOwner ||
+           s == TaskbarEmbedStrategy::PopupShellOwner ||
+           s == TaskbarEmbedStrategy::ChildShellSetParent ||
+           s == TaskbarEmbedStrategy::PopupTrayNotify ||
+           s == TaskbarEmbedStrategy::ChildTrayNotify ||
+           s == TaskbarEmbedStrategy::PopupTaskHost;
+}
+
+bool StrategyUsesTrueChild(TaskbarEmbedStrategy s) {
+    return s == TaskbarEmbedStrategy::ChildShellSetParent ||
+           s == TaskbarEmbedStrategy::CreateChildShell ||
+           s == TaskbarEmbedStrategy::ChildTrayNotify;
+}
+
+bool StrategyUsesScreenCoords(TaskbarEmbedStrategy s) {
+    return s == TaskbarEmbedStrategy::TopmostOverlay ||
+           s == TaskbarEmbedStrategy::AppbarEdge;
+}
 
 bool SetWindowLongPtrChecked(HWND hwnd, int index, LONG_PTR value) {
     SetLastError(ERROR_SUCCESS);
@@ -38,12 +123,18 @@ std::string WToUtf8(const std::wstring& w) {
     return s;
 }
 
-bool AttachToTaskbarParent(HWND child, HWND parent) {
+bool AttachToTaskbarParent(HWND child, HWND parent, TaskbarEmbedStrategy strategy) {
     if (!child || !parent || !IsWindow(child) || !IsWindow(parent)) return false;
 
     LONG_PTR style = GetWindowLongPtrW(child, GWL_STYLE);
-    style &= ~WS_CHILD;
-    style |= WS_POPUP | WS_SYSMENU | WS_CLIPSIBLINGS;
+    if (StrategyUsesTrueChild(strategy)) {
+        style &= ~(WS_POPUP | WS_CAPTION | WS_THICKFRAME |
+                   WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU);
+        style |= WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
+    } else {
+        style &= ~WS_CHILD;
+        style |= WS_POPUP | WS_SYSMENU | WS_CLIPSIBLINGS;
+    }
     if (!SetWindowLongPtrChecked(child, GWL_STYLE, style)) return false;
 
     LONG_PTR ex = GetWindowLongPtrW(child, GWL_EXSTYLE);
@@ -83,6 +174,71 @@ bool IsTaskbarCenterAligned() {
         &value,
         &size);
     return status != ERROR_SUCCESS || value != 0;
+}
+
+HWND FindFirstChild(HWND parent, const wchar_t* cls) {
+    return parent ? FindWindowExW(parent, nullptr, cls, nullptr) : nullptr;
+}
+
+HWND FindTaskHost(HWND shell) {
+    if (!shell) return nullptr;
+    if (HWND bridge = FindFirstChild(shell, L"Windows.UI.Composition.DesktopWindowContentBridge"))
+        return bridge;
+    HWND bar = FindFirstChild(shell, L"ReBarWindow32");
+    if (!bar) bar = FindFirstChild(shell, L"WorkerW");
+    if (!bar) return nullptr;
+    if (HWND min = FindFirstChild(bar, L"MSTaskSwWClass")) return min;
+    if (HWND list = FindFirstChild(bar, L"MSTaskListWClass")) return list;
+    return bar;
+}
+
+HWND ResolveStrategyParent(HWND shell, TaskbarEmbedStrategy strategy) {
+    switch (strategy) {
+    case TaskbarEmbedStrategy::PopupTrayNotify:
+    case TaskbarEmbedStrategy::ChildTrayNotify:
+        return FindFirstChild(shell, L"TrayNotifyWnd");
+    case TaskbarEmbedStrategy::PopupTaskHost:
+        return FindTaskHost(shell);
+    default:
+        return shell;
+    }
+}
+
+bool EnsureAppbarRegistered(HWND hwnd, bool& registered) {
+    if (!hwnd || !IsWindow(hwnd)) return false;
+    if (registered) return true;
+    APPBARDATA abd{};
+    abd.cbSize = sizeof(abd);
+    abd.hWnd = hwnd;
+    abd.uCallbackMessage = kTaskbarAppbarCallbackMsg;
+    registered = SHAppBarMessage(ABM_NEW, &abd) != FALSE;
+    return registered;
+}
+
+void UnregisterAppbar(HWND hwnd, bool& registered) {
+    if (!registered) return;
+    if (hwnd && IsWindow(hwnd)) {
+        APPBARDATA abd{};
+        abd.cbSize = sizeof(abd);
+        abd.hWnd = hwnd;
+        SHAppBarMessage(ABM_REMOVE, &abd);
+    }
+    registered = false;
+}
+
+bool TaskbarEdgeFromRect(const RECT& tb, const RECT& mon, UINT& edge) {
+    int w = tb.right - tb.left;
+    int h = tb.bottom - tb.top;
+    if (w >= h) {
+        int topDist = abs(tb.top - mon.top);
+        int bottomDist = abs(mon.bottom - tb.bottom);
+        edge = topDist <= bottomDist ? ABE_TOP : ABE_BOTTOM;
+        return true;
+    }
+    int leftDist = abs(tb.left - mon.left);
+    int rightDist = abs(mon.right - tb.right);
+    edge = leftDist <= rightDist ? ABE_LEFT : ABE_RIGHT;
+    return true;
 }
 
 } // namespace
@@ -141,11 +297,13 @@ void MainWindow::TraceTaskbarBand(const wchar_t* tag) const {
         ? GetWindowLongPtrW(taskbarHwnd_, GWL_EXSTYLE) : 0;
 
     wchar_t buf[1024]{};
+    TaskbarEmbedStrategy strategy = TaskbarStrategyFromIndex(taskbarActiveStrategy_);
     swprintf_s(buf,
-        L"[X-TODO taskbar] %s parent=%p band=%p inserted=%d attachErr=%lu "
+        L"[X-TODO taskbar] %s strategy=%s parent=%p band=%p inserted=%d attachErr=%lu "
         L"gp=%p ga=%p visible=%d style=%p ex=%p parentRect=(%ld,%ld,%ld,%ld) "
         L"bandRect=(%ld,%ld,%ld,%ld) client=(%ld,%ld)\n",
         tag ? tag : L"",
+        TaskbarStrategyTag(strategy),
         reinterpret_cast<void*>(taskbarParent_),
         reinterpret_cast<void*>(taskbarHwnd_),
         taskbarInserted_ ? 1 : 0,
@@ -166,6 +324,9 @@ void MainWindow::TraceTaskbarBand(const wchar_t* tag) const {
 
 TaskbarLayoutResult MainWindow::EnsureTaskbarBand() {
     if (!RegisterTaskbarBandClass()) return TaskbarLayoutResult::Fatal;
+    TaskbarEmbedStrategy strategy = TaskbarStrategyFromId(ui_.taskbarStrategy);
+    ui_.taskbarStrategy = TaskbarStrategyId(strategy);
+    int strategyIndex = TaskbarStrategyIndex(strategy);
 
     struct Host { HWND hwnd; HMONITOR mon; std::wstring dev; };
     std::vector<Host> hosts;
@@ -186,47 +347,82 @@ TaskbarLayoutResult MainWindow::EnsureTaskbarBand() {
     if (hosts.empty()) return TaskbarLayoutResult::TransientUnavailable;
 
     // 选择规则：持久化显示器 > 主窗口所在 > 鼠标所在 > 主任务栏 > 首个有效。
-    HWND host = nullptr;
+    HWND shellHost = nullptr;
     if (!ui_.taskbarMonitor.empty()) {
         std::wstring want = Utf8ToW(ui_.taskbarMonitor);
-        for (auto& h : hosts) if (h.dev == want) { host = h.hwnd; break; }
+        for (auto& h : hosts) if (h.dev == want) { shellHost = h.hwnd; break; }
     }
-    if (!host && geom_.valid) {
+    if (!shellHost && geom_.valid) {
         POINT c{ geom_.x + geom_.w / 2, geom_.y + geom_.h / 2 };
         HMONITOR m = MonitorFromPoint(c, MONITOR_DEFAULTTONULL);
-        if (m) for (auto& h : hosts) if (h.mon == m) { host = h.hwnd; break; }
+        if (m) for (auto& h : hosts) if (h.mon == m) { shellHost = h.hwnd; break; }
     }
-    if (!host) {
+    if (!shellHost) {
         POINT mp;
         if (GetCursorPos(&mp)) {
             HMONITOR m = MonitorFromPoint(mp, MONITOR_DEFAULTTONULL);
-            if (m) for (auto& h : hosts) if (h.mon == m) { host = h.hwnd; break; }
+            if (m) for (auto& h : hosts) if (h.mon == m) { shellHost = h.hwnd; break; }
         }
     }
-    if (!host && primary)
-        for (auto& h : hosts) if (h.hwnd == primary) { host = h.hwnd; break; }
-    if (!host) host = hosts.front().hwnd;
+    if (!shellHost && primary)
+        for (auto& h : hosts) if (h.hwnd == primary) { shellHost = h.hwnd; break; }
+    if (!shellHost) shellHost = hosts.front().hwnd;
+
+    HWND strategyParent = ResolveStrategyParent(shellHost, strategy);
+    if (!strategyParent) return TaskbarLayoutResult::TransientUnavailable;
 
     // 任务栏 host 变化（含 Explorer 重启）：销毁旧 band 后重建。
-    if (taskbarHwnd_ && taskbarParent_ != host) DestroyTaskbarBand();
+    if (taskbarHwnd_ &&
+        (taskbarParent_ != strategyParent || taskbarActiveStrategy_ != strategyIndex))
+        DestroyTaskbarBand();
 
-    taskbarParent_ = host;
+    taskbarParent_ = strategyParent;
+    taskbarActiveStrategy_ = strategyIndex;
     if (!taskbarHwnd_ || !IsWindow(taskbarHwnd_)) {
         taskbarInserted_ = false;
         taskbarAttachError_ = ERROR_SUCCESS;
+        DWORD exStyle = WS_EX_TOOLWINDOW;
+        DWORD style = WS_POPUP | WS_SYSMENU | WS_CLIPSIBLINGS;
+        HWND createParent = nullptr;
+
+        if (strategy == TaskbarEmbedStrategy::PopupShellOwner)
+            createParent = hwnd_;
+        if (strategy == TaskbarEmbedStrategy::CreateChildShell) {
+            style = WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
+            createParent = taskbarParent_;
+        }
+        if (strategy == TaskbarEmbedStrategy::TopmostOverlay) {
+            exStyle |= WS_EX_TOPMOST | WS_EX_NOACTIVATE;
+            createParent = nullptr;
+        }
+        if (strategy == TaskbarEmbedStrategy::AppbarEdge) {
+            exStyle |= WS_EX_TOPMOST;
+            createParent = nullptr;
+        }
+
         taskbarHwnd_ = CreateWindowExW(
-            WS_EX_TOOLWINDOW,
+            exStyle,
             kTaskbarBandClass, L"",
-            WS_POPUP | WS_SYSMENU | WS_CLIPSIBLINGS,
+            style,
             0, 0, 10, 10,
-            hwnd_, nullptr, GetModuleHandleW(nullptr), this);
+            createParent, nullptr, GetModuleHandleW(nullptr), this);
         if (!taskbarHwnd_) { taskbarParent_ = nullptr; return TaskbarLayoutResult::Fatal; }
         TraceTaskbarBand(L"after-create");
     }
-    if (!AttachToTaskbarParent(taskbarHwnd_, taskbarParent_)) {
+
+    if (StrategyUsesSetParent(strategy) &&
+        !AttachToTaskbarParent(taskbarHwnd_, taskbarParent_, strategy)) {
         taskbarInserted_ = false;
         taskbarAttachError_ = GetLastError();
         TraceTaskbarBand(L"attach-failed");
+        DestroyTaskbarBand();
+        return TaskbarLayoutResult::TransientUnavailable;
+    }
+    if (strategy == TaskbarEmbedStrategy::AppbarEdge &&
+        !EnsureAppbarRegistered(taskbarHwnd_, taskbarAppbarRegistered_)) {
+        taskbarInserted_ = false;
+        taskbarAttachError_ = GetLastError();
+        TraceTaskbarBand(L"appbar-new-failed");
         DestroyTaskbarBand();
         return TaskbarLayoutResult::TransientUnavailable;
     }
@@ -238,14 +434,17 @@ TaskbarLayoutResult MainWindow::EnsureTaskbarBand() {
     if (r == TaskbarLayoutResult::Fatal) { DestroyTaskbarBand(); return TaskbarLayoutResult::TransientUnavailable; }
     TraceTaskbarBand(L"after-layout");
 
-    for (auto& h : hosts) if (h.hwnd == host) { ui_.taskbarMonitor = WToUtf8(h.dev); break; }
+    for (auto& h : hosts) if (h.hwnd == shellHost) { ui_.taskbarMonitor = WToUtf8(h.dev); break; }
     if (r == TaskbarLayoutResult::TransientUnavailable) {
         // 自动隐藏 / Explorer 过渡：不显示未布局的 band，由调用方决定是否重试。
         KillTimer(hwnd_, kTaskbarRefreshTimerId);
         ShowWindow(taskbarHwnd_, SW_HIDE);
     } else {
-        ShowWindow(taskbarHwnd_, SW_SHOW);
-        SetWindowPos(taskbarHwnd_, HWND_TOP, 0, 0, 0, 0,
+        int showCmd = StrategyUsesScreenCoords(strategy) ? SW_SHOWNOACTIVATE : SW_SHOW;
+        HWND z = strategy == TaskbarEmbedStrategy::TopmostOverlay ||
+                 strategy == TaskbarEmbedStrategy::AppbarEdge ? HWND_TOPMOST : HWND_TOP;
+        ShowWindow(taskbarHwnd_, showCmd);
+        SetWindowPos(taskbarHwnd_, z, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         SetTimer(hwnd_, kTaskbarRefreshTimerId, 1000, nullptr);
         TraceTaskbarBand(L"after-show");
@@ -259,6 +458,59 @@ TaskbarLayoutResult MainWindow::LayoutTaskbarBand() {
         return TaskbarLayoutResult::TransientUnavailable;
     if (!IsTaskbarBandAttached())
         return TaskbarLayoutResult::TransientUnavailable;
+    TaskbarEmbedStrategy strategy = TaskbarStrategyFromIndex(taskbarActiveStrategy_);
+
+    if (strategy == TaskbarEmbedStrategy::AppbarEdge) {
+        RECT tb{};
+        if (!GetWindowRect(taskbarParent_, &tb)) return TaskbarLayoutResult::TransientUnavailable;
+        HMONITOR mon = MonitorFromWindow(taskbarParent_, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi{ sizeof(mi) };
+        if (!mon || !GetMonitorInfoW(mon, &mi)) return TaskbarLayoutResult::TransientUnavailable;
+        UINT edge = ABE_BOTTOM;
+        TaskbarEdgeFromRect(tb, mi.rcMonitor, edge);
+
+        UINT dpi = GetDpiForWindow(taskbarParent_); if (!dpi) dpi = 96;
+        auto SC = [&](int v) { return MulDiv(v, dpi, 96); };
+        int w = ClampI(SC(ui_.taskbarWidth), SC(120), SC(520));
+        int h = SC(34);
+
+        RECT rc{};
+        if (edge == ABE_TOP || edge == ABE_BOTTOM) {
+            int rightReserve = SC(88);
+            int right = mi.rcMonitor.right - rightReserve;
+            if (right - w < mi.rcMonitor.left) right = mi.rcMonitor.right;
+            int left = ClampI(right - w, mi.rcMonitor.left, mi.rcMonitor.right - w);
+            rc = RECT{ left, edge == ABE_TOP ? mi.rcMonitor.top : mi.rcMonitor.bottom - h,
+                       left + w, edge == ABE_TOP ? mi.rcMonitor.top + h : mi.rcMonitor.bottom };
+        } else {
+            int x = edge == ABE_LEFT ? mi.rcMonitor.left : mi.rcMonitor.right - h;
+            int y = mi.rcMonitor.bottom - SC(220);
+            if (y < mi.rcMonitor.top) y = mi.rcMonitor.top;
+            rc = RECT{ x, y, x + h, y + SC(180) };
+        }
+
+        APPBARDATA abd{};
+        abd.cbSize = sizeof(abd);
+        abd.hWnd = taskbarHwnd_;
+        abd.uEdge = edge;
+        abd.rc = rc;
+        SHAppBarMessage(ABM_QUERYPOS, &abd);
+        if (edge == ABE_TOP) abd.rc.bottom = abd.rc.top + h;
+        else if (edge == ABE_BOTTOM) abd.rc.top = abd.rc.bottom - h;
+        else if (edge == ABE_LEFT) abd.rc.right = abd.rc.left + h;
+        else if (edge == ABE_RIGHT) abd.rc.left = abd.rc.right - h;
+        SHAppBarMessage(ABM_SETPOS, &abd);
+        SetWindowPos(taskbarHwnd_, HWND_TOPMOST,
+            abd.rc.left, abd.rc.top, abd.rc.right - abd.rc.left, abd.rc.bottom - abd.rc.top,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW);
+
+        POINT tl{ abd.rc.left, abd.rc.top }, br{ abd.rc.right, abd.rc.bottom };
+        ScreenToClient(taskbarParent_, &tl);
+        ScreenToClient(taskbarParent_, &br);
+        taskbarBandRect_ = RECT{ tl.x, tl.y, br.x, br.y };
+        return TaskbarLayoutResult::Ok;
+    }
+
     RECT pc{};
     if (!GetClientRect(taskbarParent_, &pc)) return TaskbarLayoutResult::TransientUnavailable;
     UINT dpi = GetDpiForWindow(taskbarParent_); if (!dpi) dpi = 96;
@@ -270,10 +522,16 @@ TaskbarLayoutResult MainWindow::LayoutTaskbarBand() {
         return TaskbarLayoutResult::TransientUnavailable;
 
     if (horizontal) {
-        int minW = SC(96), maxW = SC(520);
+        bool parentIsShell = strategy == TaskbarEmbedStrategy::PopupShellNoOwner ||
+                             strategy == TaskbarEmbedStrategy::PopupShellOwner ||
+                             strategy == TaskbarEmbedStrategy::ChildShellSetParent ||
+                             strategy == TaskbarEmbedStrategy::CreateChildShell ||
+                             strategy == TaskbarEmbedStrategy::TopmostOverlay;
+        int minW = parentIsShell ? SC(96) : SC(28);
+        int maxW = SC(520);
         int maxAllowed = parentW - 2 * margin;
         if (maxAllowed > maxW) maxAllowed = maxW;
-        if (maxAllowed < SC(48)) return TaskbarLayoutResult::TransientUnavailable;
+        if (maxAllowed < SC(20)) return TaskbarLayoutResult::TransientUnavailable;
         int maxH = parentH - 2 * margin;
         if (maxH < SC(16)) return TaskbarLayoutResult::TransientUnavailable;
         int h = maxH < SC(24) ? maxH : ClampI(SC(32), SC(24), maxH);
@@ -293,19 +551,23 @@ TaskbarLayoutResult MainWindow::LayoutTaskbarBand() {
         if (w < minW) w = minW;
         if (w > maxAllowed) w = maxAllowed;
 
-        bool requestLeft = ui_.taskbarDockT < 0.5;
         int x = 0;
-        if (requestLeft && IsTaskbarCenterAligned()) {
-            x = hasStart ? (startRc.left - w - SC(2)) : SC(2);
+        if (!parentIsShell) {
+            x = ClampI((parentW - w) / 2, margin, parentW - margin - w);
         } else {
-            HWND notify = FindWindowExW(taskbarParent_, nullptr, L"TrayNotifyWnd", nullptr);
-            RECT notifyRc{};
-            if (notify &&
-                WindowRectInParentClient(taskbarParent_, notify, notifyRc) &&
-                notifyRc.right > notifyRc.left) {
-                x = notifyRc.left - w + SC(2);
+            bool requestLeft = ui_.taskbarDockT < 0.5;
+            if (requestLeft && IsTaskbarCenterAligned()) {
+                x = hasStart ? (startRc.left - w - SC(2)) : SC(2);
             } else {
-                x = parentW - SC(88) - w;
+                HWND notify = FindWindowExW(taskbarParent_, nullptr, L"TrayNotifyWnd", nullptr);
+                RECT notifyRc{};
+                if (notify &&
+                    WindowRectInParentClient(taskbarParent_, notify, notifyRc) &&
+                    notifyRc.right > notifyRc.left) {
+                    x = notifyRc.left - w + SC(2);
+                } else {
+                    x = parentW - SC(88) - w;
+                }
             }
         }
         if (x + w > parentW - margin) x = parentW - margin - w;
@@ -328,8 +590,18 @@ TaskbarLayoutResult MainWindow::LayoutTaskbarBand() {
     HRGN rgn = CreateRoundRectRgn(0, 0, bw + 1, bh + 1, radius, radius);
     if (rgn && !SetWindowRgn(taskbarHwnd_, rgn, TRUE)) DeleteObject(rgn);
 
-    SetWindowPos(taskbarHwnd_, HWND_TOP,
-        taskbarBandRect_.left, taskbarBandRect_.top, bw, bh,
+    int x = taskbarBandRect_.left;
+    int y = taskbarBandRect_.top;
+    HWND z = HWND_TOP;
+    if (StrategyUsesScreenCoords(strategy)) {
+        POINT origin{ 0, 0 };
+        if (!ClientToScreen(taskbarParent_, &origin)) return TaskbarLayoutResult::TransientUnavailable;
+        x += origin.x;
+        y += origin.y;
+        z = HWND_TOPMOST;
+    }
+
+    SetWindowPos(taskbarHwnd_, z, x, y, bw, bh,
         SWP_NOACTIVATE | SWP_SHOWWINDOW);
     return TaskbarLayoutResult::Ok;
 }
@@ -365,11 +637,15 @@ void MainWindow::PaintTaskbarBand(HWND hwnd) {
 
     int active = model_.ActiveCount();
     std::wstring text;
+    TaskbarEmbedStrategy strategy = TaskbarStrategyFromIndex(taskbarActiveStrategy_);
+    std::wstring prefix = L"[";
+    prefix += TaskbarStrategyTag(strategy);
+    prefix += L"] ";
     if (active > 0) {
         int idx = ClampI(taskbarPreviewIndex_, 0, active - 1);
-        text = L"(" + std::to_wstring(active) + L") " + model_.Items()[idx].text;
+        text = prefix + L"(" + std::to_wstring(active) + L") " + model_.Items()[idx].text;
     } else {
-        text = T(Str::TaskbarAllDone, lang_);
+        text = prefix + T(Str::TaskbarAllDone, lang_);
     }
 
     UINT dpi = GetDpiForWindow(taskbarParent_ ? taskbarParent_ : hwnd); if (!dpi) dpi = 96;
@@ -489,6 +765,8 @@ LRESULT MainWindow::TaskbarWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             taskbarParent_ = nullptr;
             taskbarInserted_ = false;
             taskbarAttachError_ = ERROR_SUCCESS;
+            taskbarAppbarRegistered_ = false;
+            taskbarActiveStrategy_ = -1;
             taskbarHover_ = taskbarPressed_ = taskbarDragging_ = false;
         }
         return 0;
@@ -498,6 +776,7 @@ LRESULT MainWindow::TaskbarWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 void MainWindow::DestroyTaskbarBand() {
     KillTimer(hwnd_, kTaskbarRefreshTimerId);
+    UnregisterAppbar(taskbarHwnd_, taskbarAppbarRegistered_);
     if (taskbarHwnd_ && IsWindow(taskbarHwnd_)) {
         HWND h = taskbarHwnd_;
         taskbarHwnd_ = nullptr; // 先清，避免 WM_NCDESTROY 重入
@@ -507,6 +786,7 @@ void MainWindow::DestroyTaskbarBand() {
     taskbarParent_ = nullptr;
     taskbarInserted_ = false;
     taskbarAttachError_ = ERROR_SUCCESS;
+    taskbarActiveStrategy_ = -1;
     taskbarHover_ = taskbarPressed_ = taskbarDragging_ = false;
 }
 
@@ -541,6 +821,27 @@ void MainWindow::LeaveTaskbarMode() {
 void MainWindow::ScheduleTaskbarRetry(bool hideMainOnOk) {
     taskbarRetryHideMain_ = hideMainOnOk;
     SetTimer(hwnd_, kTaskbarRetryTimerId, 1000, nullptr);
+}
+
+void MainWindow::SetTaskbarStrategy(const std::string& strategy) {
+    TaskbarEmbedStrategy parsed = TaskbarStrategyFromId(strategy);
+    const char* id = TaskbarStrategyId(parsed);
+    if (ui_.taskbarStrategy == id && mountMode_ != MountMode::Taskbar) return;
+    ui_.taskbarStrategy = id;
+
+    if (mountMode_ == MountMode::Taskbar) {
+        bool mainWasHidden = !IsWindowVisible(hwnd_);
+        DestroyTaskbarBand();
+        TaskbarLayoutResult r = EnsureTaskbarBand();
+        if (r == TaskbarLayoutResult::Ok && IsTaskbarBandReady()) {
+            ShowWindow(hwnd_, SW_HIDE);
+            taskbarRetryHideMain_ = false;
+        } else {
+            ShowWindow(hwnd_, SW_SHOW);
+            ScheduleTaskbarRetry(mainWasHidden);
+        }
+    }
+    ScheduleSave();
 }
 
 void MainWindow::ShowFromTaskbarBand() {

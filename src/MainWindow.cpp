@@ -407,6 +407,51 @@ struct PopupMenuItem {
     int indent = 0;
 };
 
+struct TaskbarStrategyMenuEntry {
+    UINT cmd;
+    const char* id;
+    const wchar_t* zh;
+    const wchar_t* en;
+};
+
+constexpr TaskbarStrategyMenuEntry kTaskbarStrategyMenu[] = {
+    { 130, "popup_shell_noowner",   L"TB1 popup shell no owner", L"TB1 popup shell no owner" },
+    { 131, "popup_shell_owner",     L"TB2 popup shell owner",    L"TB2 popup shell owner" },
+    { 132, "child_shell_setparent", L"TB3 child shell SetParent", L"TB3 child shell SetParent" },
+    { 133, "create_child_shell",    L"TB4 create child shell",   L"TB4 create child shell" },
+    { 134, "popup_traynotify",      L"TB5 popup TrayNotify",     L"TB5 popup TrayNotify" },
+    { 135, "child_traynotify",      L"TB6 child TrayNotify",     L"TB6 child TrayNotify" },
+    { 136, "popup_taskhost",        L"TB7 popup task host",      L"TB7 popup task host" },
+    { 137, "topmost_overlay",       L"TB8 topmost overlay",      L"TB8 topmost overlay" },
+    { 138, "appbar_edge",           L"TB9 appbar edge",          L"TB9 appbar edge" }
+};
+
+const TaskbarStrategyMenuEntry* FindTaskbarStrategyCommand(UINT cmd) {
+    for (const auto& entry : kTaskbarStrategyMenu)
+        if (entry.cmd == cmd) return &entry;
+    return nullptr;
+}
+
+void AppendTaskbarStrategyItems(std::vector<PopupMenuItem>& items, Lang lang, const std::string& current) {
+    items.push_back(PopupMenuItem{
+        0,
+        lang == Lang::Zh ? L"任务栏方案" : L"Taskbar strategy",
+        false, false, false, false
+    });
+    for (const auto& entry : kTaskbarStrategyMenu) {
+        items.push_back(PopupMenuItem{
+            entry.cmd,
+            lang == Lang::Zh ? entry.zh : entry.en,
+            false,
+            current == entry.id,
+            false,
+            true,
+            1
+        });
+    }
+    items.push_back(PopupMenuItem{ 0, L"", true });
+}
+
 struct PopupMenuState {
     HWND hwnd = nullptr;
     HWND owner = nullptr;
@@ -469,7 +514,7 @@ int MeasurePopupMenuWidth(HWND owner, const std::vector<PopupMenuItem>& items) {
     ReleaseDC(owner, dc);
     int minW = DpiPx(owner, 100);
     int preferred = maxText + DpiPx(owner, 4);
-    return ClampPopupWidthToOwner(owner, preferred, minW, DpiPx(owner, 220));
+    return ClampPopupWidthToOwner(owner, preferred, minW, DpiPx(owner, 300));
 }
 
 int MeasurePopupMenuHeight(HWND owner, const std::vector<PopupMenuItem>& items) {
@@ -1111,6 +1156,11 @@ void MainWindow::RemoveTrayIcon() {
 }
 
 void MainWindow::HandleMenuCommand(UINT cmd) {
+    if (const auto* strategy = FindTaskbarStrategyCommand(cmd)) {
+        SetTaskbarStrategy(strategy->id);
+        if (mountMode_ != MountMode::Taskbar) SetMountMode(MountMode::Taskbar);
+        return;
+    }
     switch (cmd) {
         case 1:  Show();                              break;
         case 2:  ToggleAutostart();                   break;
@@ -1136,7 +1186,10 @@ void MainWindow::ShowTrayMenu() {
         PopupMenuItem{ 0, L"", true },
         PopupMenuItem{ 10, T(Str::ModeNormal, lang_), false, mountMode_ == MountMode::Normal },
         PopupMenuItem{ 11, T(Str::ModeDesktop, lang_), false, mountMode_ == MountMode::Desktop },
-        PopupMenuItem{ 12, T(Str::ModeTaskbar, lang_), false, mountMode_ == MountMode::Taskbar },
+        PopupMenuItem{ 12, T(Str::ModeTaskbar, lang_), false, mountMode_ == MountMode::Taskbar }
+    };
+    AppendTaskbarStrategyItems(items, lang_, ui_.taskbarStrategy);
+    items.insert(items.end(), {
         PopupMenuItem{ 0, T(Str::ModeCapsule, lang_), false, false, false, false },
         PopupMenuItem{ 30, T(Str::StyleSlim, lang_), false, inCapsule && capsuleStyle_ == CapsuleStyle::Slim, false, true, 1 },
         PopupMenuItem{ 31, T(Str::StyleDot, lang_), false, inCapsule && capsuleStyle_ == CapsuleStyle::Dot, false, true, 1 },
@@ -1145,7 +1198,7 @@ void MainWindow::ShowTrayMenu() {
         PopupMenuItem{ 2, T(Str::Autostart, lang_), false, Autostart::IsEnabled() },
         PopupMenuItem{ 0, L"", true },
         PopupMenuItem{ 3, T(Str::Exit, lang_), false, false, true }
-    };
+    });
 
     POINT pt;
     GetCursorPos(&pt);
@@ -1162,7 +1215,10 @@ void MainWindow::ShowTitleMenu() {
     std::vector<PopupMenuItem> items{
         PopupMenuItem{ 10, T(Str::ModeNormal, lang_), false, mountMode_ == MountMode::Normal },
         PopupMenuItem{ 11, T(Str::ModeDesktop, lang_), false, mountMode_ == MountMode::Desktop },
-        PopupMenuItem{ 12, T(Str::ModeTaskbar, lang_), false, mountMode_ == MountMode::Taskbar },
+        PopupMenuItem{ 12, T(Str::ModeTaskbar, lang_), false, mountMode_ == MountMode::Taskbar }
+    };
+    AppendTaskbarStrategyItems(items, lang_, ui_.taskbarStrategy);
+    items.insert(items.end(), {
         PopupMenuItem{ 0, T(Str::ModeCapsule, lang_), false, false, false, false },
         PopupMenuItem{ 30, T(Str::StyleSlim, lang_), false, inCapsule && capsuleStyle_ == CapsuleStyle::Slim, false, true, 1 },
         PopupMenuItem{ 31, T(Str::StyleDot, lang_), false, inCapsule && capsuleStyle_ == CapsuleStyle::Dot, false, true, 1 },
@@ -1171,7 +1227,7 @@ void MainWindow::ShowTitleMenu() {
         PopupMenuItem{ 2, T(Str::Autostart, lang_), false, Autostart::IsEnabled() },
         PopupMenuItem{ 0, L"", true },
         PopupMenuItem{ 3, T(Str::Exit, lang_), false, false, true }
-    };
+    });
 
     RECT rc{};
     GetClientRect(hwnd_, &rc);

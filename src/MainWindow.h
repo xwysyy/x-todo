@@ -106,6 +106,7 @@ private:
     // —— 挂载形态（普通 / 挂桌面 / 侧边胶囊）——
     void        SetMountMode(MountMode m);
     void        ApplyMountMode();
+    void        SetTaskbarStrategy(const std::string& strategy);
 
     // ---- 任务栏状态条 ----
     static LRESULT CALLBACK TaskbarWndProcStatic(HWND, UINT, WPARAM, LPARAM);
@@ -217,6 +218,8 @@ private:
     HWND  taskbarParent_         = nullptr;
     bool  taskbarInserted_       = false;
     DWORD taskbarAttachError_    = ERROR_SUCCESS;
+    bool  taskbarAppbarRegistered_ = false;
+    int   taskbarActiveStrategy_ = -1;
     bool  taskbarHover_          = false;
     bool  taskbarPressed_        = false;
     bool  taskbarDragging_       = false;
