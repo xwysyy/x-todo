@@ -12,6 +12,15 @@
 #ifndef DWMWA_WINDOW_CORNER_PREFERENCE
 #define DWMWA_WINDOW_CORNER_PREFERENCE 33
 #endif
+#ifndef DWMWA_NCRENDERING_POLICY
+#define DWMWA_NCRENDERING_POLICY 2
+#endif
+#ifndef DWMNCRP_USEWINDOWSTYLE
+#define DWMNCRP_USEWINDOWSTYLE 0
+#endif
+#ifndef DWMNCRP_DISABLED
+#define DWMNCRP_DISABLED 1
+#endif
 #ifndef DWMWA_BORDER_COLOR
 #define DWMWA_BORDER_COLOR 34
 #endif
@@ -101,6 +110,18 @@ void ApplyPopupRoundShape(HWND hwnd, int w, int h, int regionRadius) {
         HRGN rgn = CreateRoundRectRgn(0, 0, w + 1, h + 1, regionRadius, regionRadius);
         if (rgn && !SetWindowRgn(hwnd, rgn, TRUE)) DeleteObject(rgn);
     }
+}
+
+void SetMainWindowDropShadow(HWND hwnd, bool enabled) {
+    LONG_PTR style = GetClassLongPtrW(hwnd, GCL_STYLE);
+    LONG_PTR wanted = enabled ? (style | CS_DROPSHADOW)
+                              : (style & ~((LONG_PTR)CS_DROPSHADOW));
+    if (wanted == style) return;
+
+    SetClassLongPtrW(hwnd, GCL_STYLE, wanted);
+    SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                 SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
 int DpiPx(HWND owner, float v) {
@@ -1563,6 +1584,7 @@ void MainWindow::UpdateLayeredState() {
 }
 
 // Dot 折叠态由 per-pixel layered alpha 定形；Slim 折叠态交给 DWM 圆角合成，避免 GDI region 硬边。
+// Dot 折叠态额外压制系统矩形阴影，避免透明圆点外露出方框。
 // 折叠态压制 DWM 边框线；其余形态恢复矩形 + ROUND。
 void MainWindow::UpdateCapsuleRegion() {
     const bool slimShrunk = mountMode_ == MountMode::Capsule
@@ -1570,6 +1592,10 @@ void MainWindow::UpdateCapsuleRegion() {
     const bool dotShrunk  = mountMode_ == MountMode::Capsule
                             && capsuleStyle_ == CapsuleStyle::Dot  && capsuleShrunk();
     const bool suppressBorder = slimShrunk || dotShrunk;
+
+    SetMainWindowDropShadow(hwnd_, !dotShrunk);
+    int ncPolicy = dotShrunk ? DWMNCRP_DISABLED : DWMNCRP_USEWINDOWSTYLE;
+    DwmSetWindowAttribute(hwnd_, DWMWA_NCRENDERING_POLICY, &ncPolicy, sizeof(ncPolicy));
 
     int corner = dotShrunk ? 1 : 2; // 1=DWMWCP_DONOTROUND, 2=DWMWCP_ROUND
     DwmSetWindowAttribute(hwnd_, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
