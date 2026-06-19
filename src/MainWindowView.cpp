@@ -174,41 +174,41 @@ MainWindow::Hit MainWindow::HitTest(float x, float y) {
 // ——————————————————————————— 渲染 ———————————————————————————
 
 void MainWindow::FillRect(const D2D1_RECT_F& r, uint32_t rgb, float a) {
-    brush_->SetColor(Theme::Color(rgb, a));
+    brush_->SetColor(Theme::D2DColor(rgb, a));
     rt_->FillRectangle(r, brush_);
 }
 
 void MainWindow::StrokeRect(const D2D1_RECT_F& r, uint32_t rgb, float w, float a) {
-    brush_->SetColor(Theme::Color(rgb, a));
+    brush_->SetColor(Theme::D2DColor(rgb, a));
     rt_->DrawRectangle(r, brush_, w);
 }
 
 void MainWindow::Text(const std::wstring& s, const D2D1_RECT_F& r, uint32_t rgb,
                       IDWriteTextFormat* fmt) {
     if (s.empty()) return;
-    brush_->SetColor(Theme::Color(rgb));
+    brush_->SetColor(Theme::D2DColor(rgb));
     rt_->DrawTextW(s.c_str(), (UINT32)s.size(), fmt, r, brush_);
 }
 
 void MainWindow::DrawCheckbox(const D2D1_RECT_F& box, bool checked) {
     D2D1_ROUNDED_RECT rr{ box, S(4), S(4) };
     if (checked) {
-        brush_->SetColor(Theme::Color(Theme::kCheckFill));
+        brush_->SetColor(Theme::D2DColor(theme_.colors.checkFill));
         rt_->FillRoundedRectangle(rr, brush_);
-        brush_->SetColor(Theme::Color(Theme::kCheckMark));
+        brush_->SetColor(Theme::D2DColor(theme_.colors.checkMark));
         float l = box.left, t = box.top, w = box.right - box.left, hh = box.bottom - box.top;
         rt_->DrawLine(D2D1::Point2F(l + w * 0.24f, t + hh * 0.52f),
                       D2D1::Point2F(l + w * 0.42f, t + hh * 0.70f), brush_, S(2));
         rt_->DrawLine(D2D1::Point2F(l + w * 0.42f, t + hh * 0.70f),
                       D2D1::Point2F(l + w * 0.76f, t + hh * 0.30f), brush_, S(2));
     } else {
-        brush_->SetColor(Theme::Color(Theme::kCheckBorder));
+        brush_->SetColor(Theme::D2DColor(theme_.colors.checkBorder));
         rt_->DrawRoundedRectangle(rr, brush_, S(1.5f));
     }
 }
 
 void MainWindow::DrawRow(const RowLayout& r, bool hovered) {
-    if (hovered) FillRect(r.row, Theme::kHover, 0.04f);
+    if (hovered) FillRect(r.row, theme_.colors.rowHover); // 最终消费色，不再混 alpha
 
     DrawCheckbox(r.check, r.completed);
 
@@ -226,23 +226,23 @@ void MainWindow::DrawRow(const RowLayout& r, bool hovered) {
                 }
             }
             if (r.strikeLayout) {
-                brush_->SetColor(Theme::Color(Theme::kTextDone));
+                brush_->SetColor(Theme::D2DColor(theme_.colors.textDone));
                 rt_->DrawTextLayout(D2D1::Point2F(r.text.left, r.text.top), r.strikeLayout, brush_);
             }
         } else {
-            Text(s, r.text, Theme::kText, textFormat_);
+            Text(s, r.text, theme_.colors.text, textFormat_);
         }
     }
 
     if (hovered) {
-        brush_->SetColor(Theme::Color(Theme::kDanger));
+        brush_->SetColor(Theme::D2DColor(theme_.colors.danger));
         D2D1_RECT_F d = r.del;
         float p = S(5);
         rt_->DrawLine(D2D1::Point2F(d.left + p, d.top + p), D2D1::Point2F(d.right - p, d.bottom - p), brush_, S(1.6f));
         rt_->DrawLine(D2D1::Point2F(d.right - p, d.top + p), D2D1::Point2F(d.left + p, d.bottom - p), brush_, S(1.6f));
 
         if (!r.completed) {
-            brush_->SetColor(Theme::Color(Theme::kHandle));
+            brush_->SetColor(Theme::D2DColor(theme_.colors.handle));
             float cx = (r.handle.left + r.handle.right) / 2;
             float hh = r.handle.bottom - r.handle.top;
             for (int i = 0; i < 3; i++) {
@@ -256,7 +256,7 @@ void MainWindow::DrawRow(const RowLayout& r, bool hovered) {
 void MainWindow::DrawSection() {
     if (model_.CompletedCount() == 0) return;
 
-    brush_->SetColor(Theme::Color(Theme::kDivider));
+    brush_->SetColor(Theme::D2DColor(theme_.colors.divider));
     rt_->DrawLine(D2D1::Point2F(sectionRect_.left, sectionRect_.top),
                   D2D1::Point2F(sectionRect_.right, sectionRect_.top), brush_, S(1));
 
@@ -265,17 +265,17 @@ void MainWindow::DrawSection() {
                ui_.completedExpanded ? L"▾" : L"▸");
     D2D1_RECT_F lr = sectionRect_;
     lr.left += S(2);
-    Text(buf, lr, Theme::kTextWeak, smallFormat_);
+    Text(buf, lr, theme_.colors.textWeak, smallFormat_);
 
-    Text(T(Str::Clear, lang_), clearRect_, Theme::kDanger, smallFormat_);
+    Text(T(Str::Clear, lang_), clearRect_, theme_.colors.danger, smallFormat_);
 }
 
 void MainWindow::DrawTitleBar() {
     D2D1_RECT_F tr = D2D1::RectF(S(Theme::kPadX), 0, menuRect_.left - S(8), S(Theme::kTitleH));
-    Text(L"X-TODO", tr, Theme::kTextWeak, smallFormat_);
+    Text(L"X-TODO", tr, theme_.colors.textWeak, smallFormat_);
 
     // 菜单按钮：三条横线
-    brush_->SetColor(Theme::Color(Theme::kTextWeak));
+    brush_->SetColor(Theme::D2DColor(theme_.colors.textWeak));
     {
         float mcx = (menuRect_.left + menuRect_.right) / 2;
         float mcy = (menuRect_.top + menuRect_.bottom) / 2;
@@ -289,14 +289,14 @@ void MainWindow::DrawTitleBar() {
                                      (pinRect_.top + pinRect_.bottom) / 2);
     D2D1_ELLIPSE pe = D2D1::Ellipse(pc, S(5), S(5));
     if (ui_.alwaysOnTop) {
-        brush_->SetColor(Theme::Color(Theme::kCheckFill));
+        brush_->SetColor(Theme::D2DColor(theme_.colors.checkFill));
         rt_->FillEllipse(pe, brush_);
     } else {
-        brush_->SetColor(Theme::Color(Theme::kHandle));
+        brush_->SetColor(Theme::D2DColor(theme_.colors.handle));
         rt_->DrawEllipse(pe, brush_, S(1.5f));
     }
 
-    brush_->SetColor(Theme::Color(Theme::kTextWeak));
+    brush_->SetColor(Theme::D2DColor(theme_.colors.textWeak));
     D2D1_RECT_F c = closeRect_;
     float p = S(7);
     rt_->DrawLine(D2D1::Point2F(c.left + p, c.top + p), D2D1::Point2F(c.right - p, c.bottom - p), brush_, S(1.6f));
@@ -305,7 +305,7 @@ void MainWindow::DrawTitleBar() {
 
 void MainWindow::DrawAddRow(bool hovered) {
     if (addRect_.bottom <= addRect_.top) return;
-    if (hovered) FillRect(addRect_, Theme::kHover, 0.04f);
+    if (hovered) FillRect(addRect_, theme_.colors.rowHover); // 最终消费色，不再混 alpha
 
     const float size = S(Theme::kCheckSize);
     const float cy = (addRect_.top + addRect_.bottom) / 2.0f;
@@ -314,7 +314,7 @@ void MainWindow::DrawAddRow(bool hovered) {
     const float cx = (float)RoundToInt((icon.left + icon.right) * 0.5f) + 0.5f;
     const float iy = (icon.top + icon.bottom) * 0.5f;
     const float half = S(6);
-    brush_->SetColor(Theme::Color(hovered ? Theme::kCheckFill : Theme::kHandle));
+    brush_->SetColor(Theme::D2DColor(hovered ? theme_.colors.checkFill : theme_.colors.handle));
     rt_->DrawLine(D2D1::Point2F(cx - half, iy), D2D1::Point2F(cx + half, iy), brush_, S(1.6f));
     rt_->DrawLine(D2D1::Point2F(cx, iy - half), D2D1::Point2F(cx, iy + half), brush_, S(1.6f));
 }
@@ -332,19 +332,19 @@ bool MainWindow::Render() {
         const int n = model_.ActiveCount();
         if (capsuleStyle_ == CapsuleStyle::Dot) {
             // 圆点：整窗填色，由椭圆窗口区域裁成圆；hover 加深作可见提示
-            uint32_t c = capsuleHover_ ? (n > 0 ? Theme::kCheckFillHover : Theme::kHandleHover)
-                                       : (n > 0 ? Theme::kCheckFill : Theme::kHandle);
-            rt_->Clear(Theme::Color(c));
+            uint32_t c = capsuleHover_ ? (n > 0 ? theme_.capsule.dotActiveHover : theme_.capsule.dotIdleHover)
+                                       : (n > 0 ? theme_.capsule.dotActive : theme_.capsule.dotIdle);
+            rt_->Clear(Theme::D2DColor(c));
         } else {
             // 细边：纸色圆角竖条 + 居中数字（半透明由窗口 alpha 表达，绘制不改色）
-            rt_->Clear(Theme::Color(Theme::kPaper));
+            rt_->Clear(Theme::D2DColor(theme_.capsule.slimPaper));
             const float radius = W < H ? W * 0.5f : H * 0.5f;
             D2D1_ROUNDED_RECT rr{ D2D1::RectF(0.75f, 0.75f, W - 0.75f, H - 0.75f), radius, radius };
-            brush_->SetColor(Theme::Color(Theme::kPaperEdge));
+            brush_->SetColor(Theme::D2DColor(theme_.capsule.slimEdge));
             rt_->DrawRoundedRectangle(rr, brush_, S(1.5f));
             wchar_t buf[16];
             swprintf_s(buf, L"%d", n);
-            brush_->SetColor(Theme::Color(n > 0 ? Theme::kText : Theme::kTextWeak));
+            brush_->SetColor(Theme::D2DColor(n > 0 ? theme_.capsule.slimText : theme_.colors.textWeak));
             smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
             rt_->DrawTextW(buf, (UINT32)wcslen(buf), smallFormat_, D2D1::RectF(0, 0, W, H), brush_);
             smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
@@ -358,7 +358,7 @@ bool MainWindow::Render() {
 
     rt_->BeginDraw();
     rt_->SetTransform(D2D1::Matrix3x2F::Identity());
-    rt_->Clear(Theme::Color(Theme::kPaper));
+    rt_->Clear(Theme::D2DColor(theme_.colors.paper));
 
     // 可滚动内容层
     D2D1_RECT_F vp = D2D1::RectF(0, ContentTop(), W, H - S(Theme::kFooterH));
@@ -372,7 +372,7 @@ bool MainWindow::Render() {
 
     if (dragging_ && dragInsert_ >= 0) {
         float yy = dragInsert_ * S(Theme::kRowH);
-        brush_->SetColor(Theme::Color(Theme::kCheckFill));
+        brush_->SetColor(Theme::D2DColor(theme_.colors.focusRing));
         rt_->DrawLine(D2D1::Point2F(S(Theme::kPadX), yy),
                       D2D1::Point2F(W - S(Theme::kPadX), yy), brush_, S(2));
     }
@@ -382,7 +382,7 @@ bool MainWindow::Render() {
 
     // 固定层
     DrawTitleBar();
-    StrokeRect(D2D1::RectF(0.5f, 0.5f, W - 0.5f, H - 0.5f), Theme::kPaperEdge, 1.0f);
+    StrokeRect(D2D1::RectF(0.5f, 0.5f, W - 0.5f, H - 0.5f), theme_.colors.paperEdge, 1.0f);
 
     if (rt_->EndDraw() == (HRESULT)D2DERR_RECREATE_TARGET) {
         DiscardDeviceResources();

@@ -23,6 +23,31 @@ const wchar_t* T(Str key, Lang lang) {
         case Str::ConfirmCancel: return zh ? L"取消"            : L"Cancel";
         case Str::LoadFailedMsg: return zh ? L"读取待办数据失败，原文件已备份为 data.txt.corrupt.bak，本次以空白开始。"
                                            : L"Could not read your data. The original was backed up as data.txt.corrupt.bak; starting empty.";
+
+        case Str::ThemeHeader:        return zh ? L"皮肤"           : L"Theme";
+        case Str::ThemeFollowSystem:  return zh ? L"跟随系统"       : L"Follow system";
+        case Str::ThemePaper:         return zh ? L"暖纸"           : L"Paper";
+        case Str::ThemeMint:          return zh ? L"薄荷"           : L"Mint";
+        case Str::ThemeSky:           return zh ? L"天空"           : L"Sky";
+        case Str::ThemeRose:          return zh ? L"玫瑰"           : L"Rose";
+        case Str::ThemeSand:          return zh ? L"沙色"           : L"Sand";
+        case Str::ThemeGraphite:      return zh ? L"石墨"           : L"Graphite";
+        case Str::ThemeInk:           return zh ? L"墨色"           : L"Ink";
+        case Str::ThemeContrast:      return zh ? L"高对比"         : L"High contrast";
+        case Str::ThemeCustom:        return zh ? L"自定义主题…"    : L"Custom themes…";
+        case Str::ThemeManager:       return zh ? L"主题管理"       : L"Theme manager";
+        case Str::ThemeReload:        return zh ? L"重新加载主题"   : L"Reload themes";
+        case Str::ThemeOpenFolder:    return zh ? L"打开主题目录"   : L"Open theme folder";
+        case Str::ThemeExportCurrent: return zh ? L"导出当前主题"   : L"Export current theme";
+        case Str::ThemeIssues:        return zh ? L"加载问题"       : L"Load issues";
+        case Str::ThemeNotices:       return zh ? L"运行时提示"     : L"Notices";
+        case Str::ThemeSetLightFollow:return zh ? L"设为浅色跟随主题" : L"Set as light follow theme";
+        case Str::ThemeSetDarkFollow: return zh ? L"设为深色跟随主题" : L"Set as dark follow theme";
+        case Str::ThemeFallbackNotice:return zh ? L"主题不可用，已回退到暖纸"
+                                                : L"Theme unavailable; fell back to Paper";
+        case Str::ThemeHighContrastNotice:
+                                      return zh ? L"Windows 高对比已开启，当前主题可能不易辨认"
+                                                : L"Windows High Contrast is on; the current theme may be hard to read";
     }
     return L"";
 }

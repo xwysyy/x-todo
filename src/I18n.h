@@ -20,7 +20,30 @@ enum class Str {
     ClearAllMsg,  // 清空确认正文
     ConfirmOk,    // 确认按钮
     ConfirmCancel,// 取消按钮
-    LoadFailedMsg // 数据读取失败提示
+    LoadFailedMsg,// 数据读取失败提示
+
+    // —— 主题 ——
+    ThemeHeader,             // 菜单"皮肤"分组标题
+    ThemeFollowSystem,       // 跟随系统
+    ThemePaper,              // 暖纸
+    ThemeMint,               // 薄荷
+    ThemeSky,                // 天空
+    ThemeRose,               // 玫瑰
+    ThemeSand,               // 沙色
+    ThemeGraphite,           // 石墨
+    ThemeInk,                // 墨色
+    ThemeContrast,           // 高对比
+    ThemeCustom,             // 自定义主题…（菜单入口）
+    ThemeManager,            // 主题管理窗口标题
+    ThemeReload,             // 重新加载主题
+    ThemeOpenFolder,         // 打开主题目录
+    ThemeExportCurrent,      // 导出当前主题
+    ThemeIssues,             // 加载 issue 列表标题
+    ThemeNotices,            // 运行时 notice 列表标题
+    ThemeSetLightFollow,     // 设为浅色跟随主题
+    ThemeSetDarkFollow,      // 设为深色跟随主题
+    ThemeFallbackNotice,     // 主题回退提示
+    ThemeHighContrastNotice  // 高对比开启提示
 };
 
 const wchar_t* T(Str key, Lang lang);

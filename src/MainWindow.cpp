@@ -1,6 +1,9 @@
 #include "MainWindow.h"
 #include "Autostart.h"
 #include "Theme.h"
+#include "ThemeCatalog.h"
+#include "ThemeLoader.h"
+#include "ThemeManagerWindow.h"
 
 #include <windowsx.h>
 #include <dwmapi.h>
@@ -19,6 +22,12 @@ constexpr int kDefaultWindowW = 260;
 constexpr int kDefaultWindowH = 340;
 constexpr int kMinWindowW = 220;
 constexpr int kMinWindowH = 160;
+
+// 主题菜单命令分区（1000..1999；避免与挂载 / 语言命令冲突）
+constexpr UINT kCmdThemeFollowSystem = 1000;
+constexpr UINT kCmdThemeBuiltinBase  = 1100; // + 内置主题索引
+constexpr UINT kCmdThemeCustomBase   = 1300; // + 自定义主题索引
+constexpr UINT kCmdThemeManager      = 1900;
 
 template <class T> void SafeRelease(T** p) {
     if (*p) { (*p)->Release(); *p = nullptr; }
@@ -132,6 +141,7 @@ struct ConfirmState {
     HWND owner = nullptr;
     std::wstring message;
     Lang lang = Lang::Zh;
+    Theme::ThemeVisual theme; // 打开时持有的主题快照
     bool danger = true;
     bool done = false;
     bool result = false;
@@ -181,17 +191,19 @@ void EndConfirm(ConfirmState* s, bool result) {
 
 void D2DDrawButton(ConfirmState* s, const D2D1_RECT_F& r, const std::wstring& label,
                    bool primary, bool hover, bool pressed) {
+    const Theme::ColorSet& c = s->theme.colors;
     float scale = DpiScale(s->owner);
     float radius = 9.0f * scale;
-    uint32_t fill = primary ? Theme::kDanger : Theme::kPaper;
-    if (primary && hover) fill = BlendColor(Theme::kDanger, 0xA95745, pressed ? 0.55f : 0.25f);
-    if (!primary && hover) fill = BlendColor(Theme::kHover, Theme::kPaper, pressed ? 0.10f : 0.05f);
+    uint32_t fill = primary ? c.danger : c.paperElevated;
+    if (primary && hover) fill = c.dangerHover;
+    if (!primary && hover) fill = pressed ? c.buttonPressed : c.buttonHover;
     D2D1_ROUNDED_RECT rr{ r, radius, radius };
     s->brush->SetColor(Theme::Color(fill));
     s->rt->FillRoundedRectangle(rr, s->brush);
-    s->brush->SetColor(Theme::Color(primary ? Theme::kDanger : Theme::kPaperEdge));
+    s->brush->SetColor(Theme::Color(primary ? c.danger : c.paperEdge));
     s->rt->DrawRoundedRectangle(rr, s->brush, 1.0f);
-    s->brush->SetColor(Theme::Color(primary ? 0xFFFFFF : Theme::kText));
+    // primary 按钮文字用 checkMark（各主题均与 danger 块高对比），普通按钮用 text
+    s->brush->SetColor(Theme::Color(primary ? c.checkMark : c.text));
     s->rt->DrawTextW(label.c_str(), (UINT32)label.size(), s->btnFmt, r, s->brush);
 }
 
@@ -218,10 +230,10 @@ LRESULT CALLBACK ConfirmProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
         s->rt->BeginDraw();
         s->rt->SetTransform(D2D1::Matrix3x2F::Identity());
-        s->rt->Clear(Theme::Color(Theme::kPaper));
+        s->rt->Clear(Theme::Color(s->theme.colors.paperElevated));
 
         float padX = S(14), padTop = S(14), iconSz = S(14), iconGap = S(9);
-        uint32_t accent = s->danger ? Theme::kDanger : Theme::kCheckFill;
+        uint32_t accent = s->danger ? s->theme.colors.danger : s->theme.colors.checkFill;
 
         float rowH = (float)s->msgH > iconSz ? (float)s->msgH : iconSz;
         float blockW = iconSz + iconGap + (float)s->msgW;
@@ -232,7 +244,7 @@ LRESULT CALLBACK ConfirmProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         D2D1_RECT_F iconRect = D2D1::RectF(blockLeft, iconTop, blockLeft + iconSz, iconTop + iconSz);
         float iconR = iconSz * 0.5f;
         D2D1_ROUNDED_RECT iconRR{ iconRect, iconR, iconR };
-        s->brush->SetColor(Theme::Color(BlendColor(accent, Theme::kPaper, 0.12f)));
+        s->brush->SetColor(Theme::Color(BlendColor(accent, s->theme.colors.paperElevated, 0.12f)));
         s->rt->FillRoundedRectangle(iconRR, s->brush);
         s->brush->SetColor(Theme::Color(accent));
         s->rt->DrawRoundedRectangle(iconRR, s->brush, 1.0f);
@@ -241,7 +253,7 @@ LRESULT CALLBACK ConfirmProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         float msgLeft = blockLeft + iconSz + iconGap;
         float msgTop = padTop + (rowH - (float)s->msgH) / 2.0f;
         D2D1_RECT_F msgRect = D2D1::RectF(msgLeft, msgTop, msgLeft + (float)s->msgW, msgTop + (float)s->msgH);
-        s->brush->SetColor(Theme::Color(Theme::kText));
+        s->brush->SetColor(Theme::Color(s->theme.colors.text));
         s->rt->DrawTextW(s->message.c_str(), (UINT32)s->message.size(), s->textFmt, msgRect, s->brush);
 
         RECT cancelI = ConfirmCancelRect(*s), okI = ConfirmOkRect(*s);
@@ -346,6 +358,7 @@ int ConfirmHeight(const ConfirmState& s) {
 }
 
 bool ShowThemedConfirm(HWND owner, const wchar_t* text, Lang lang, bool danger,
+                       const Theme::ThemeVisual& theme,
                        ID2D1Factory* d2dFactory, IDWriteFactory* dwrite) {
     const wchar_t* cls = L"XTodoConfirmPopup";
     if (!RegisterPopupClass(cls, ConfirmProc)) return false;
@@ -354,6 +367,7 @@ bool ShowThemedConfirm(HWND owner, const wchar_t* text, Lang lang, bool danger,
     state.owner = owner;
     state.message = text ? text : L"";
     state.lang = lang;
+    state.theme = theme;
     state.danger = danger;
     state.d2dFactory = d2dFactory;
     state.dwrite = dwrite;
@@ -433,12 +447,14 @@ struct PopupMenuItem {
     bool danger = false;
     bool enabled = true;
     int indent = 0;
+    bool header = false; // 分组标题：加粗、不可点击
 };
 
 struct PopupMenuState {
     HWND hwnd = nullptr;
     HWND owner = nullptr;
     const std::vector<PopupMenuItem>* items = nullptr;
+    Theme::ThemeVisual theme; // 打开时持有的主题快照
     bool done = false;
     UINT result = 0;
     int hover = -1;
@@ -460,7 +476,7 @@ int MenuItemAt(const PopupMenuState& s, int y) {
         const PopupMenuItem& item = (*s.items)[i];
         int h = item.separator ? s.sepH : s.rowH;
         if (y >= top && y < top + h)
-            return (!item.separator && item.enabled) ? (int)i : -1;
+            return (!item.separator && item.enabled && !item.header) ? (int)i : -1;
         top += h;
     }
     return -1;
@@ -524,7 +540,7 @@ LRESULT CALLBACK PopupMenuProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
         s->rt->BeginDraw();
         s->rt->SetTransform(D2D1::Matrix3x2F::Identity());
-        s->rt->Clear(Theme::Color(Theme::kPaper));
+        s->rt->Clear(Theme::Color(s->theme.colors.paperElevated));
 
         float y = Sf(5);
         float pad = Sf(10);
@@ -532,22 +548,30 @@ LRESULT CALLBACK PopupMenuProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             const PopupMenuItem& item = (*s->items)[i];
             if (item.separator) {
                 float mid = y + (float)s->sepH / 2.0f;
-                s->brush->SetColor(Theme::Color(Theme::kDivider));
+                s->brush->SetColor(Theme::Color(s->theme.colors.divider));
                 s->rt->DrawLine(D2D1::Point2F(pad, mid), D2D1::Point2F(W - pad, mid), s->brush, 1.0f);
                 y += (float)s->sepH;
                 continue;
             }
             D2D1_RECT_F row = D2D1::RectF(Sf(6), y, W - Sf(6), y + (float)s->rowH);
+            if (item.header) { // 分组标题：textWeak、不可点击、无 hover / 勾选
+                D2D1_RECT_F hr = D2D1::RectF(row.left + Sf(2), row.top, row.right, row.bottom);
+                s->brush->SetColor(Theme::Color(s->theme.colors.textWeak));
+                s->rt->DrawTextW(item.text.c_str(), (UINT32)item.text.size(), s->textFmt, hr, s->brush,
+                                 D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                y += (float)s->rowH;
+                continue;
+            }
             if ((int)i == s->hover) {
                 D2D1_ROUNDED_RECT rr{ row, Sf(8), Sf(8) };
-                s->brush->SetColor(Theme::Color(BlendColor(Theme::kHover, Theme::kPaper, 0.06f)));
+                s->brush->SetColor(Theme::Color(s->theme.colors.menuHover));
                 s->rt->FillRoundedRectangle(rr, s->brush);
             }
             if (item.checked) {
                 float ckL = row.left + Sf(6), ckT = row.top + Sf(5);
                 float ckR = row.left + Sf(18), ckB = row.top + Sf(17);
                 float cw = ckR - ckL, ch = ckB - ckT;
-                s->brush->SetColor(Theme::Color(Theme::kCheckFill));
+                s->brush->SetColor(Theme::Color(s->theme.colors.checkFill));
                 s->rt->DrawLine(D2D1::Point2F(ckL + cw / 4, ckT + ch / 2),
                                 D2D1::Point2F(ckL + cw / 2, ckT + ch * 3 / 4), s->brush, 2.0f);
                 s->rt->DrawLine(D2D1::Point2F(ckL + cw / 2, ckT + ch * 3 / 4),
@@ -555,7 +579,8 @@ LRESULT CALLBACK PopupMenuProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             D2D1_RECT_F textR = D2D1::RectF(row.left + Sf(24.0f + item.indent * 14.0f), row.top,
                                              row.right - Sf(8), row.bottom);
-            uint32_t textColor = item.enabled ? (item.danger ? Theme::kDanger : Theme::kText) : Theme::kTextWeak;
+            uint32_t textColor = item.enabled ? (item.danger ? s->theme.colors.danger : s->theme.colors.text)
+                                              : s->theme.colors.disabledText;
             s->brush->SetColor(Theme::Color(textColor));
             s->rt->DrawTextW(item.text.c_str(), (UINT32)item.text.size(), s->textFmt, textR, s->brush,
                              D2D1_DRAW_TEXT_OPTIONS_CLIP);
@@ -592,7 +617,7 @@ LRESULT CALLBACK PopupMenuProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 int idx = s->hover;
                 for (int tries = 0; tries < count; ++tries) {
                     idx = (wp == VK_DOWN) ? (idx + 1 + count) % count : (idx - 1 + count) % count;
-                    if (!(*s->items)[idx].separator && (*s->items)[idx].enabled) {
+                    if (!(*s->items)[idx].separator && !(*s->items)[idx].header && (*s->items)[idx].enabled) {
                         s->hover = idx;
                         InvalidateRect(hwnd, nullptr, FALSE);
                         break;
@@ -619,6 +644,7 @@ LRESULT CALLBACK PopupMenuProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 UINT ShowPopupMenu(HWND owner, POINT pt, const std::vector<PopupMenuItem>& items, bool alignRight,
+                   const Theme::ThemeVisual& theme,
                    ID2D1Factory* d2dFactory, IDWriteFactory* dwrite) {
     const wchar_t* cls = L"XTodoPopupMenu";
     if (!RegisterPopupClass(cls, PopupMenuProc)) return 0;
@@ -626,6 +652,7 @@ UINT ShowPopupMenu(HWND owner, POINT pt, const std::vector<PopupMenuItem>& items
     PopupMenuState state{};
     state.owner = owner;
     state.items = &items;
+    state.theme = theme;
     state.d2dFactory = d2dFactory;
     state.dwrite = dwrite;
     state.rowH = DpiPx(owner, 22);
@@ -690,6 +717,32 @@ UINT ShowPopupMenu(HWND owner, POINT pt, const std::vector<PopupMenuItem>& items
     SetForegroundWindow(owner);
     return state.result;
 }
+
+// 构造"皮肤"子组。供托盘 / 标题栏菜单复用。
+void AppendThemeMenu(std::vector<PopupMenuItem>& items, Lang lang,
+                     const std::string& mode, const std::string& curId,
+                     const std::vector<Theme::ThemeVisual>& customs) {
+    items.push_back(PopupMenuItem{ 0, T(Str::ThemeHeader, lang), false, false, false, true, 0, true });
+    items.push_back(PopupMenuItem{ kCmdThemeFollowSystem, T(Str::ThemeFollowSystem, lang), false,
+                                   mode == "follow_system", false, true, 1 });
+    static const struct { const char* id; Str name; } kBuiltinItems[] = {
+        { "paper", Str::ThemePaper }, { "mint", Str::ThemeMint }, { "sky", Str::ThemeSky },
+        { "rose", Str::ThemeRose }, { "sand", Str::ThemeSand }, { "graphite", Str::ThemeGraphite },
+        { "ink", Str::ThemeInk }, { "contrast", Str::ThemeContrast }
+    };
+    for (UINT i = 0; i < 8; i++) {
+        bool cur = (mode != "follow_system") && (curId == kBuiltinItems[i].id);
+        items.push_back(PopupMenuItem{ kCmdThemeBuiltinBase + i, T(kBuiltinItems[i].name, lang),
+                                       false, cur, false, true, 1 });
+    }
+    UINT shown = (UINT)customs.size(); if (shown > 8) shown = 8; // 超出 8 个在管理窗口看全部
+    for (UINT i = 0; i < shown; i++) {
+        bool cur = (mode == "custom") && (curId == customs[i].id);
+        std::wstring nm = (lang == Lang::Zh) ? customs[i].name.zh : customs[i].name.en;
+        items.push_back(PopupMenuItem{ kCmdThemeCustomBase + i, nm, false, cur, false, true, 1 });
+    }
+    items.push_back(PopupMenuItem{ kCmdThemeManager, T(Str::ThemeCustom, lang), false, false, false, true, 1 });
+}
 } // namespace
 
 // ——————————————————————————— 生命周期 ———————————————————————————
@@ -752,7 +805,6 @@ bool MainWindow::Create() {
     DwmSetWindowAttribute(hwnd_, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
 
     explorerRestartMsg_ = RegisterWindowMessageW(L"TaskbarCreated");
-    AddTrayIcon();
     lang_ = ui_.lang == "zh" ? Lang::Zh
           : ui_.lang == "en" ? Lang::En
           : SystemDefaultLang();
@@ -760,11 +812,122 @@ bool MainWindow::Create() {
     mountMode_ = ui_.mountMode == "desktop" ? MountMode::Desktop
                : ui_.mountMode == "capsule" ? MountMode::Capsule
                : MountMode::Normal;
+    // 主题快照必须在 AddTrayIcon（按主题生成图标）与首帧渲染前就绪
+    ReloadThemes();
+    ApplyResolvedTheme(false);
+    AddTrayIcon();
     ApplyMountMode(); // 应用持久化形态（含置顶 / 布局）
 
     if (loadResult == LoadResult::Failed) // 数据读取失败：告知用户（原文件已备份）
         MessageBoxW(hwnd_, T(Str::LoadFailedMsg, lang_), L"X-TODO", MB_OK | MB_ICONWARNING);
     return true;
+}
+
+// ——————————————————————————— 主题 ———————————————————————————
+
+void MainWindow::ReloadThemes() {
+    Theme::LoadResult lr = Theme::LoadCustomThemes();
+    customThemes_ = std::move(lr.themes);
+    themeIssues_  = std::move(lr.issues);
+}
+
+void MainWindow::ApplyResolvedTheme(bool persist) {
+    themeNotices_.clear(); // notice 反映最近一次解析状态，不累积
+
+    bool darkOk = false, hcOk = false;
+    Theme::ResolveInput in;
+    in.mode               = ui_.themeMode;
+    in.themeId            = ui_.themeId;
+    in.lightThemeId       = ui_.lightThemeId;
+    in.darkThemeId        = ui_.darkThemeId;
+    in.systemDark         = Theme::SystemUsesDarkMode(&darkOk);
+    in.systemHighContrast = Theme::SystemHighContrastOn(&hcOk);
+    in.customThemes       = &customThemes_;
+
+    Theme::ResolveResult rr = Theme::ResolveTheme(in);
+    theme_ = rr.theme;
+
+    // 系统状态读取失败：显式记录（不静默回退到浅色 / 非高对比）
+    if (!darkOk)
+        themeNotices_.push_back({ lang_ == Lang::Zh ? L"无法读取系统明暗模式，已按浅色处理"
+                                                    : L"Could not read system light/dark mode; using light" });
+    if (!hcOk)
+        themeNotices_.push_back({ lang_ == Lang::Zh ? L"无法读取系统高对比状态，已按未开启处理"
+                                                    : L"Could not read system high-contrast state; assuming off" });
+
+    if (rr.fellBack) {
+        std::wstring msg = T(Str::ThemeFallbackNotice, lang_);
+        if (!rr.message.empty()) msg += L"（" + rr.message + L"）";
+        themeNotices_.push_back({ msg });
+    }
+    // 系统高对比但用户显式选了非高对比主题：提示当前主题可能不可访问
+    if (in.systemHighContrast && ui_.themeMode != "follow_system" && theme_.id != "contrast")
+        themeNotices_.push_back({ T(Str::ThemeHighContrastNotice, lang_) });
+
+    // 编辑框背景刷随主题失效，下次 WM_CTLCOLOREDIT 按新主题重建
+    if (editBg_) { DeleteObject(editBg_); editBg_ = nullptr; }
+    if (edit_ && IsWindow(edit_) && IsWindowVisible(edit_))
+        InvalidateRect(edit_, nullptr, TRUE);
+
+    UpdateLayeredState();        // Slim 胶囊透明度使用新主题 slimAlpha
+    RefreshTrayIcon();           // 按主题重建托盘图标
+    if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+    if (persist) ScheduleSave();
+}
+
+void MainWindow::SetThemeMode(const std::string& mode) {
+    if (mode != "builtin" && mode != "custom" && mode != "follow_system") return;
+    ui_.themeMode = mode;
+    ApplyResolvedTheme(true);
+}
+
+void MainWindow::SetThemeId(const std::string& id) {
+    // 点击具体主题：退出 follow_system，按 id 前缀进入 custom 或 builtin
+    ui_.themeMode = (id.rfind("custom.", 0) == 0) ? "custom" : "builtin";
+    ui_.themeId = id;
+    ApplyResolvedTheme(true);
+}
+
+void MainWindow::SetFollowSystemThemes(const std::string& lightId, const std::string& darkId) {
+    if (!lightId.empty()) ui_.lightThemeId = lightId;
+    if (!darkId.empty())  ui_.darkThemeId = darkId;
+    ApplyResolvedTheme(true);
+}
+
+void MainWindow::ShowThemeManager() {
+    Theme::ManagerHost host;
+    auto refresh = [this, &host]() {
+        host.currentMode  = ui_.themeMode;
+        host.currentId    = theme_.id;
+        host.lightThemeId = ui_.lightThemeId;
+        host.darkThemeId  = ui_.darkThemeId;
+        host.current      = theme_;
+        host.builtins     = Theme::BuiltInThemes();
+        host.customs      = customThemes_;
+        host.issues       = themeIssues_;
+        host.notices      = themeNotices_;
+        host.lang         = lang_;
+    };
+    refresh();
+    host.applyTheme = [this, &refresh](const std::string& id) { SetThemeId(id); refresh(); };
+    host.reload     = [this, &refresh]() { ReloadThemes(); ApplyResolvedTheme(true); refresh(); };
+    host.openFolder = [this]() {
+        std::wstring dir = Theme::ThemeDirectory();
+        if (!dir.empty()) {
+            CreateDirectoryW(dir.c_str(), nullptr); // 打开时才创建目录
+            ShellExecuteW(hwnd_, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        }
+    };
+    host.exportCurrent = [this, &refresh]() {
+        Theme::ThemeIssue err;
+        if (!Theme::ExportTheme(theme_, Theme::ThemeDirectory(), &err))
+            themeNotices_.push_back({ (lang_ == Lang::Zh ? L"导出失败：" : L"Export failed: ") + err.detail });
+        ReloadThemes(); // 导出后刷新列表
+        refresh();
+    };
+    host.setLightFollow = [this, &refresh](const std::string& id) { SetFollowSystemThemes(id, ""); refresh(); };
+    host.setDarkFollow  = [this, &refresh](const std::string& id) { SetFollowSystemThemes("", id); refresh(); };
+    Theme::ShowThemeManagerWindow(hwnd_, host);
 }
 
 void MainWindow::Show(bool expandCapsule) {
@@ -823,8 +986,21 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_SETTINGCHANGE:
-    case WM_THEMECHANGED:
+        // follow_system：系统明暗 / 高对比变化时，仅当解析出的主题 id 变化才重新应用，避免抖动
+        if (ui_.themeMode == "follow_system") {
+            bool sysDark = Theme::SystemUsesDarkMode(nullptr);
+            bool sysHC   = Theme::SystemHighContrastOn(nullptr);
+            std::string wantId = sysHC ? "contrast" : (sysDark ? ui_.darkThemeId : ui_.lightThemeId);
+            if (wantId != theme_.id) ApplyResolvedTheme(false);
+        }
+        break; // 落到 DefWindowProc，保留系统默认处理
+
     case WM_SYSCOLORCHANGE:
+        // 高对比是系统可访问性状态，参与主题解析：重读并重新应用
+        ApplyResolvedTheme(false);
+        break;
+
+    case WM_THEMECHANGED:
     case WM_DWMCOLORIZATIONCOLORCHANGED:
         break; // 落到 DefWindowProc，保留系统默认处理
 
@@ -969,9 +1145,9 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_CTLCOLOREDIT: {
         HDC hdc = (HDC)wp;
-        SetBkColor(hdc, RGB(0xFB, 0xF7, 0xEC));
-        SetTextColor(hdc, RGB(0x33, 0x31, 0x2C));
-        if (!editBg_) editBg_ = CreateSolidBrush(RGB(0xFB, 0xF7, 0xEC));
+        SetBkColor(hdc, Theme::GdiColor(theme_.colors.paper));
+        SetTextColor(hdc, Theme::GdiColor(theme_.colors.text));
+        if (!editBg_) editBg_ = CreateSolidBrush(Theme::GdiColor(theme_.colors.paper));
         return (LRESULT)editBg_;
     }
 
@@ -1062,9 +1238,81 @@ void MainWindow::Resize(UINT w, UINT h) {
 HICON MainWindow::CreateTrayIconHandle() {
     int cx = GetSystemMetrics(SM_CXSMICON);
     int cy = GetSystemMetrics(SM_CYSMICON);
-    if (cx <= 0) cx = 32;
-    if (cy <= 0) cy = 32;
-    return LoadOwnedAppIcon(cx, cy);
+    if (cx <= 0) cx = 16;
+    if (cy <= 0) cy = 16;
+
+    // 按当前主题用 GDI 绘制托盘小图标；任一步失败都回退到内置 app.ico。
+    HDC screen = GetDC(nullptr);
+    if (!screen) return LoadOwnedAppIcon(cx, cy);
+    HDC memDC = CreateCompatibleDC(screen);
+    HBITMAP colorBmp = CreateCompatibleBitmap(screen, cx, cy);
+    ReleaseDC(nullptr, screen);
+    if (!memDC || !colorBmp) {
+        if (colorBmp) DeleteObject(colorBmp);
+        if (memDC) DeleteDC(memDC);
+        return LoadOwnedAppIcon(cx, cy);
+    }
+    HGDIOBJ oldBmp = SelectObject(memDC, colorBmp);
+
+    RECT rc{ 0, 0, cx, cy };
+    HBRUSH bg = CreateSolidBrush(Theme::GdiColor(theme_.tray.background));
+    ::FillRect(memDC, &rc, bg);
+    DeleteObject(bg);
+
+    // 圆角边框
+    HPEN edgePen = CreatePen(PS_SOLID, 1, Theme::GdiColor(theme_.tray.edge));
+    HGDIOBJ obr = SelectObject(memDC, GetStockObject(NULL_BRUSH));
+    HGDIOBJ op  = SelectObject(memDC, edgePen);
+    int radius = cx / 4;
+    RoundRect(memDC, 0, 0, cx, cy, radius, radius);
+    SelectObject(memDC, op);
+    SelectObject(memDC, obr);
+    DeleteObject(edgePen);
+
+    // 主标记：三条横线（清单意象）
+    HPEN markPen = CreatePen(PS_SOLID, 1, Theme::GdiColor(theme_.tray.mark));
+    HGDIOBJ om = SelectObject(memDC, markPen);
+    int mx = cx / 4, mw = cx - cx / 2;
+    for (int i = 0; i < 3; i++) {
+        int my = cy / 3 + i * (cy / 6);
+        if (my >= cy - 1) break;
+        MoveToEx(memDC, mx, my, nullptr);
+        LineTo(memDC, mx + mw, my);
+    }
+    SelectObject(memDC, om);
+    DeleteObject(markPen);
+
+    // badge：有未完成项时右上角小点
+    if (model_.ActiveCount() > 0) {
+        HBRUSH badgeBr = CreateSolidBrush(Theme::GdiColor(theme_.tray.badge));
+        HGDIOBJ obb = SelectObject(memDC, badgeBr);
+        HGDIOBJ opb = SelectObject(memDC, GetStockObject(NULL_PEN));
+        int d = cx * 5 / 12;
+        Ellipse(memDC, cx - d, 0, cx, d);
+        SelectObject(memDC, opb);
+        SelectObject(memDC, obb);
+        DeleteObject(badgeBr);
+    }
+
+    SelectObject(memDC, oldBmp);
+    DeleteDC(memDC);
+
+    // AND mask 全 0 → 整幅不透明（方形图标）
+    int maskStride = ((cx + 15) / 16) * 2; // 1bpp，WORD 对齐
+    std::vector<BYTE> maskBits((size_t)maskStride * cy, 0);
+    HBITMAP maskBmp = CreateBitmap(cx, cy, 1, 1, maskBits.data());
+    if (!maskBmp) { DeleteObject(colorBmp); return LoadOwnedAppIcon(cx, cy); }
+
+    ICONINFO ii{};
+    ii.fIcon    = TRUE;
+    ii.hbmColor = colorBmp;
+    ii.hbmMask  = maskBmp;
+    HICON icon = CreateIconIndirect(&ii);
+    DeleteObject(colorBmp);
+    DeleteObject(maskBmp);
+
+    if (!icon) return LoadOwnedAppIcon(cx, cy);
+    return icon;
 }
 
 bool MainWindow::AddTrayIcon() {
@@ -1096,6 +1344,25 @@ void MainWindow::RemoveTrayIcon() {
     }
 }
 
+// 主题切换时按当前主题重建托盘图标。尚未登记时由 AddTrayIcon 负责创建。
+void MainWindow::RefreshTrayIcon() {
+    if (!trayAdded_) return; // 未加入托盘：图标在 AddTrayIcon 内按当前主题创建
+    HICON icon = CreateTrayIconHandle();
+    if (!icon) { // 动态生成 + app.ico 回退都失败
+        themeNotices_.push_back({ lang_ == Lang::Zh ? L"托盘图标生成失败" : L"Tray icon generation failed" });
+        return;
+    }
+    HICON old = nid_.hIcon;
+    nid_.hIcon = icon;
+    if (Shell_NotifyIconW(NIM_MODIFY, &nid_)) {
+        if (old) DestroyIcon(old); // 成功后销毁旧图标
+    } else {
+        nid_.hIcon = old;          // 失败回滚：保留旧图标，销毁新图标
+        DestroyIcon(icon);
+        themeNotices_.push_back({ lang_ == Lang::Zh ? L"托盘图标更新失败" : L"Tray icon update failed" });
+    }
+}
+
 void MainWindow::HandleMenuCommand(UINT cmd) {
     switch (cmd) {
         case 1:  Show();                              break;
@@ -1108,7 +1375,23 @@ void MainWindow::HandleMenuCommand(UINT cmd) {
         case 31: SetCapsuleStyle(CapsuleStyle::Dot);
                  if (mountMode_ != MountMode::Capsule) SetMountMode(MountMode::Capsule); break;
         case 20: SetLanguage(lang_ == Lang::Zh ? Lang::En : Lang::Zh); break;
-        default: break;
+        default:
+            // 主题命令分区（1000..1999）
+            if (cmd == kCmdThemeFollowSystem) {
+                SetThemeMode("follow_system");
+            } else if (cmd == kCmdThemeManager) {
+                ShowThemeManager();
+            } else if (cmd >= kCmdThemeBuiltinBase && cmd < kCmdThemeBuiltinBase + 100) {
+                static const char* kBuiltinIds[] = {
+                    "paper", "mint", "sky", "rose", "sand", "graphite", "ink", "contrast"
+                };
+                UINT idx = cmd - kCmdThemeBuiltinBase;
+                if (idx < 8) SetThemeId(kBuiltinIds[idx]);
+            } else if (cmd >= kCmdThemeCustomBase && cmd < kCmdThemeCustomBase + 200) {
+                UINT idx = cmd - kCmdThemeCustomBase;
+                if (idx < customThemes_.size()) SetThemeId(customThemes_[idx].id);
+            }
+            break;
     }
 }
 
@@ -1120,23 +1403,23 @@ void MainWindow::ShowTrayMenu() {
         PopupMenuItem{ 1, T(Str::Show, lang_) },
         PopupMenuItem{ 0, L"", true },
         PopupMenuItem{ 10, T(Str::ModeNormal, lang_), false, mountMode_ == MountMode::Normal },
-        PopupMenuItem{ 11, T(Str::ModeDesktop, lang_), false, mountMode_ == MountMode::Desktop }
-    };
-    items.insert(items.end(), {
+        PopupMenuItem{ 11, T(Str::ModeDesktop, lang_), false, mountMode_ == MountMode::Desktop },
         PopupMenuItem{ 0, T(Str::ModeCapsule, lang_), false, false, false, false },
         PopupMenuItem{ 30, T(Str::StyleSlim, lang_), false, inCapsule && capsuleStyle_ == CapsuleStyle::Slim, false, true, 1 },
         PopupMenuItem{ 31, T(Str::StyleDot, lang_), false, inCapsule && capsuleStyle_ == CapsuleStyle::Dot, false, true, 1 },
         PopupMenuItem{ 0, L"", true },
-        PopupMenuItem{ 20, T(Str::ToggleLang, lang_) },
-        PopupMenuItem{ 2, T(Str::Autostart, lang_), false, Autostart::IsEnabled() },
-        PopupMenuItem{ 0, L"", true },
-        PopupMenuItem{ 3, T(Str::Exit, lang_), false, false, true }
-    });
+    };
+    AppendThemeMenu(items, lang_, ui_.themeMode, theme_.id, customThemes_);
+    items.push_back(PopupMenuItem{ 0, L"", true });
+    items.push_back(PopupMenuItem{ 20, T(Str::ToggleLang, lang_) });
+    items.push_back(PopupMenuItem{ 2, T(Str::Autostart, lang_), false, Autostart::IsEnabled() });
+    items.push_back(PopupMenuItem{ 0, L"", true });
+    items.push_back(PopupMenuItem{ 3, T(Str::Exit, lang_), false, false, true });
 
     POINT pt;
     GetCursorPos(&pt);
     menuOpen_ = true;
-    UINT cmd = ShowPopupMenu(hwnd_, pt, items, false, d2dFactory_, dwrite_);
+    UINT cmd = ShowPopupMenu(hwnd_, pt, items, false, theme_, d2dFactory_, dwrite_);
     menuOpen_ = false;                 // 必须在 HandleMenuCommand 前清，且无论返回值
     HandleMenuCommand(cmd);
     // (R1-F001) 补判收缩，排除：退出(3)；以及刚由 Show(1) 把折叠胶囊展开的情形（否则光标在窗外会被立刻收回）
@@ -1147,25 +1430,25 @@ void MainWindow::ShowTitleMenu() {
     const bool inCapsule = mountMode_ == MountMode::Capsule;
     std::vector<PopupMenuItem> items{
         PopupMenuItem{ 10, T(Str::ModeNormal, lang_), false, mountMode_ == MountMode::Normal },
-        PopupMenuItem{ 11, T(Str::ModeDesktop, lang_), false, mountMode_ == MountMode::Desktop }
-    };
-    items.insert(items.end(), {
+        PopupMenuItem{ 11, T(Str::ModeDesktop, lang_), false, mountMode_ == MountMode::Desktop },
         PopupMenuItem{ 0, T(Str::ModeCapsule, lang_), false, false, false, false },
         PopupMenuItem{ 30, T(Str::StyleSlim, lang_), false, inCapsule && capsuleStyle_ == CapsuleStyle::Slim, false, true, 1 },
         PopupMenuItem{ 31, T(Str::StyleDot, lang_), false, inCapsule && capsuleStyle_ == CapsuleStyle::Dot, false, true, 1 },
         PopupMenuItem{ 0, L"", true },
-        PopupMenuItem{ 20, T(Str::ToggleLang, lang_) },
-        PopupMenuItem{ 2, T(Str::Autostart, lang_), false, Autostart::IsEnabled() },
-        PopupMenuItem{ 0, L"", true },
-        PopupMenuItem{ 3, T(Str::Exit, lang_), false, false, true }
-    });
+    };
+    AppendThemeMenu(items, lang_, ui_.themeMode, theme_.id, customThemes_);
+    items.push_back(PopupMenuItem{ 0, L"", true });
+    items.push_back(PopupMenuItem{ 20, T(Str::ToggleLang, lang_) });
+    items.push_back(PopupMenuItem{ 2, T(Str::Autostart, lang_), false, Autostart::IsEnabled() });
+    items.push_back(PopupMenuItem{ 0, L"", true });
+    items.push_back(PopupMenuItem{ 3, T(Str::Exit, lang_), false, false, true });
 
     RECT rc{};
     GetClientRect(hwnd_, &rc);
     POINT pt{ rc.right - (LONG)S(6), (LONG)menuRect_.bottom }; // 贴近窗口右侧弹出
     ClientToScreen(hwnd_, &pt);
     menuOpen_ = true;
-    UINT cmd = ShowPopupMenu(hwnd_, pt, items, true, d2dFactory_, dwrite_);
+    UINT cmd = ShowPopupMenu(hwnd_, pt, items, true, theme_, d2dFactory_, dwrite_);
     menuOpen_ = false;                 // 必须在 HandleMenuCommand 前清，且无论返回值
     HandleMenuCommand(cmd);
     if (cmd != 3) MaybeCollapseCapsule(); // (R1-F001) 非退出：按真实光标位置补判（cmd==3 已 DestroyWindow）
@@ -1340,7 +1623,7 @@ void MainWindow::UpdateLayeredState() {
                          SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
         }
         BYTE alpha = (capsuleShrunk() && !capsuleHover_)
-                     ? (BYTE)(Theme::kCapsuleSlimAlpha * 255.0f) : 255;
+                     ? (BYTE)(theme_.capsule.slimAlpha * 255.0f) : 255;
         SetLayeredWindowAttributes(hwnd_, 0, alpha, LWA_ALPHA);
     } else if (hasLayered) {
         SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, ex & ~WS_EX_LAYERED);
@@ -1515,7 +1798,7 @@ void MainWindow::ToggleAutostart() {
 
 bool MainWindow::Confirm(Str message, UINT icon) {
     (void)icon;
-    return ShowThemedConfirm(hwnd_, T(message, lang_), lang_, true, d2dFactory_, dwrite_);
+    return ShowThemedConfirm(hwnd_, T(message, lang_), lang_, true, theme_, d2dFactory_, dwrite_);
 }
 
 void MainWindow::DeleteItem(int itemIndex) {

@@ -36,6 +36,7 @@ X-TODO is an always-on desktop to-do note. A frameless slip stays on your deskto
 - **Three layouts:** a normal window, sunk into the desktop, or folded into a side capsule that slides out on hover.
 - **Saves itself.** Reopens exactly as you left it; the data is a single text file.
 - **Stays in the tray.** Closing hides it, a double-click brings it back, startup launch is optional.
+- **Themeable.** Built-in light, dark, and high-contrast themes; follows the system light/dark mode, or load your own theme files.
 - **Pure Win32 + Direct2D.** No .NET, no browser engine, one portable exe.
 
 ## Download
@@ -56,6 +57,28 @@ Open [Releases](https://github.com/xwysyy/X-TODO/releases), download `x-todo.exe
 | Move / resize | Drag the title bar to move, drag the edges to resize |
 | Switch layout | Right-click the tray icon: normal window / desktop / side capsule |
 
+## Themes
+
+Eight built-in themes: Paper, Mint, Sky, Rose, Sand, Graphite, Ink, and High contrast. Right-click the tray icon or open the title-bar menu and pick one under "Theme". Choose "Follow system" to track the Windows light/dark mode automatically, and the high-contrast theme kicks in when Windows turns high contrast on. Switching a theme recolors the main window, the side capsule, menus, the confirm dialog, the inline editor, and the tray icon together.
+
+### Custom themes
+
+Drop a `.xtheme` file into `%APPDATA%\x-todo\themes\` and click "Reload" in the theme manager. The file is strict JSON describing colors and display names only — no images, scripts, URLs, or external paths. Rough shape:
+
+```json
+{
+  "schema": 1,
+  "id": "custom.morning-paper",
+  "name": { "zh": "晨纸", "en": "Morning Paper" },
+  "dark": false,
+  "colors": { "paper": "#fbf7ec", "text": "#33312c", "checkFill": "#7c9a6b", "danger": "#c8755e" },
+  "capsule": { "slimPaper": "#fbf7ec", "slimAlpha": 0.6 },
+  "tray": { "background": "#fbf7ec", "mark": "#7c9a6b" }
+}
+```
+
+Colors are `#rrggbb`. The full field set (21 in `colors`, 10 in `capsule`, 4 in `tray`) is large; "Export current theme" in the theme manager writes a ready-to-edit template.
+
 ## Build
 
 On push, GitHub Actions builds it with MSVC and uploads the exe to that run's Artifacts. Version tags such as `v0.1.0` also publish a GitHub Release with the exe attached.
@@ -72,3 +95,5 @@ Stack: C++17, Win32, Direct2D / DirectWrite, CMake, statically linked CRT, singl
 ## License
 
 [MIT](LICENSE)
+
+JSON parsing uses [nlohmann/json](https://github.com/nlohmann/json) v3.11.3 (MIT), vendored as a single header in `third_party/nlohmann/`.

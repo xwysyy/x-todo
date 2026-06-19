@@ -16,6 +16,10 @@ add_executable(x-todo WIN32
     src/Store.cpp
     src/Autostart.cpp
     src/I18n.cpp
+    src/Theme.cpp
+    src/ThemeCatalog.cpp
+    src/ThemeLoader.cpp
+    src/ThemeManagerWindow.cpp
     resources/resource.rc
 )
 
@@ -24,6 +28,9 @@ target_compile_definitions(x-todo PRIVATE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
 )
+
+# vendored 第三方头文件（nlohmann/json 单头，v3.11.3，MIT）
+target_include_directories(x-todo PRIVATE third_party)
 
 target_link_libraries(x-todo PRIVATE
     d2d1

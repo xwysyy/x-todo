@@ -113,6 +113,36 @@ bool StartsWith(const std::wstring& s, const wchar_t* p) {
     return s.size() >= n && wcsncmp(s.c_str(), p, n) == 0;
 }
 
+// 精确解析单条 "ui key=value" 的 body（已去掉前缀 "ui "）。
+struct UiKeyValue {
+    std::wstring key;
+    std::wstring value;
+    bool valid = false;
+};
+
+UiKeyValue ParseExactUiKeyValue(const std::wstring& body) {
+    size_t eq = body.find(L'=');
+    if (eq == std::wstring::npos || eq == 0) return {};
+    UiKeyValue kv;
+    kv.key = body.substr(0, eq);
+    kv.value = body.substr(eq + 1);
+    while (!kv.value.empty() && (kv.value.back() == L' ' || kv.value.back() == L'\r'))
+        kv.value.pop_back();
+    kv.valid = true;
+    return kv;
+}
+
+// 主题 id 合法字符集校验：[A-Za-z0-9._-]，长度 3..64（与 ThemeLoader schema 一致）。
+bool IsValidThemeId(const std::wstring& v) {
+    if (v.size() < 3 || v.size() > 64) return false;
+    for (wchar_t c : v) {
+        bool ok = (c >= L'A' && c <= L'Z') || (c >= L'a' && c <= L'z') ||
+                  (c >= L'0' && c <= L'9') || c == L'.' || c == L'_' || c == L'-';
+        if (!ok) return false;
+    }
+    return true;
+}
+
 } // namespace
 
 std::wstring Store::DataFilePath() {
@@ -161,58 +191,47 @@ LoadResult Store::Load(TodoModel& model, WindowGeometry& geom, UiState& ui) {
                 geom = { x, y, w, h, true };
             }
         } else if (StartsWith(line, L"ui ")) {
-            if (line.find(L"completed_expanded=1") != std::wstring::npos)
-                ui.completedExpanded = true;
-            else if (line.find(L"completed_expanded=0") != std::wstring::npos)
-                ui.completedExpanded = false;
-            if (line.find(L"always_on_top=1") != std::wstring::npos)
-                ui.alwaysOnTop = true;
-            else if (line.find(L"always_on_top=0") != std::wstring::npos)
-                ui.alwaysOnTop = false;
-            size_t mp = line.find(L"mount=");
-            if (mp != std::wstring::npos) {
-                std::wstring v = line.substr(mp + 6);
-                while (!v.empty() && (v.back() == L' ' || v.back() == L'\r')) v.pop_back();
+            // 精确 key=value 分发：子串匹配会把 theme_id 误命中 light_theme_id / dark_theme_id
+            UiKeyValue kv = ParseExactUiKeyValue(line.substr(3));
+            if (!kv.valid) continue;
+            const std::wstring& k = kv.key;
+            const std::wstring& v = kv.value;
+            if (k == L"completed_expanded") {
+                ui.completedExpanded = (v == L"1");
+            } else if (k == L"always_on_top") {
+                ui.alwaysOnTop = (v == L"1");
+            } else if (k == L"mount") {
                 if (v == L"normal" || v == L"desktop" || v == L"capsule")
                     ui.mountMode = std::string(v.begin(), v.end());
                 else if (v == L"taskbar")
-                    ui.mountMode = "normal";
-            }
-            size_t lp = line.find(L"lang=");
-            if (lp != std::wstring::npos) {
-                std::wstring v = line.substr(lp + 5);
-                while (!v.empty() && (v.back() == L' ' || v.back() == L'\r')) v.pop_back();
+                    ui.mountMode = "normal"; // 旧版任务栏模式已移除，回退普通窗口
+            } else if (k == L"lang") {
                 if (v == L"zh" || v == L"en")
                     ui.lang = std::string(v.begin(), v.end());
-            }
-            size_t sp = line.find(L"capsule_style=");
-            if (sp != std::wstring::npos) {
-                std::wstring v = line.substr(sp + wcslen(L"capsule_style="));
-                while (!v.empty() && (v.back() == L' ' || v.back() == L'\r')) v.pop_back();
+            } else if (k == L"theme_mode") {
+                if (v == L"builtin" || v == L"custom" || v == L"follow_system")
+                    ui.themeMode = std::string(v.begin(), v.end());
+            } else if (k == L"theme_id") {
+                if (IsValidThemeId(v)) ui.themeId = std::string(v.begin(), v.end());
+            } else if (k == L"light_theme_id") {
+                if (IsValidThemeId(v)) ui.lightThemeId = std::string(v.begin(), v.end());
+            } else if (k == L"dark_theme_id") {
+                if (IsValidThemeId(v)) ui.darkThemeId = std::string(v.begin(), v.end());
+            } else if (k == L"capsule_style") {
                 if (v == L"slim" || v == L"dot")
                     ui.capsuleStyle = std::string(v.begin(), v.end());
-            }
-            size_t ep = line.find(L"capsule_dock_edge=");
-            if (ep != std::wstring::npos) {
-                std::wstring v = line.substr(ep + wcslen(L"capsule_dock_edge="));
-                while (!v.empty() && (v.back() == L' ' || v.back() == L'\r')) v.pop_back();
+            } else if (k == L"capsule_dock_edge") {
                 if (v == L"left" || v == L"right")
                     ui.capsuleDockEdge = std::string(v.begin(), v.end());
-            }
-            size_t tp = line.find(L"capsule_dock_t=");
-            if (tp != std::wstring::npos) {
-                std::wstring v = line.substr(tp + wcslen(L"capsule_dock_t="));
+            } else if (k == L"capsule_dock_t") {
                 wchar_t* end = nullptr;
                 double d = wcstod(v.c_str(), &end);
                 if (end != v.c_str() && std::isfinite(d))
                     ui.capsuleDockT = std::clamp(d, 0.0, 1.0);
-            }
-            size_t cp = line.find(L"capsule_monitor=");
-            if (cp != std::wstring::npos) {
-                std::wstring v = line.substr(cp + wcslen(L"capsule_monitor="));
-                while (!v.empty() && (v.back() == L' ' || v.back() == L'\r')) v.pop_back();
+            } else if (k == L"capsule_monitor") {
                 ui.capsuleMonitor = WideToUtf8(Unescape(v));
             }
+            // 未知 ui key：忽略，保留默认值，不触发 corrupt 备份路径
         }
     }
     model.ReplaceAll(std::move(items));
@@ -241,6 +260,11 @@ bool Store::Save(const TodoModel& model, const WindowGeometry& geom, const UiSta
         std::wstring lw(ui.lang.begin(), ui.lang.end());
         text += L"ui lang=" + lw + L"\n";
     }
+    // 主题字段（id 仅含 ASCII [A-Za-z0-9._-]，begin/end 转宽字符安全）
+    text += L"ui theme_mode=" + std::wstring(ui.themeMode.begin(), ui.themeMode.end()) + L"\n";
+    text += L"ui theme_id=" + std::wstring(ui.themeId.begin(), ui.themeId.end()) + L"\n";
+    text += L"ui light_theme_id=" + std::wstring(ui.lightThemeId.begin(), ui.lightThemeId.end()) + L"\n";
+    text += L"ui dark_theme_id=" + std::wstring(ui.darkThemeId.begin(), ui.darkThemeId.end()) + L"\n";
     text += L"ui capsule_style=" + std::wstring(ui.capsuleStyle.begin(), ui.capsuleStyle.end()) + L"\n";
     text += L"ui capsule_dock_edge=" + std::wstring(ui.capsuleDockEdge.begin(), ui.capsuleDockEdge.end()) + L"\n";
     {

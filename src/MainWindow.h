@@ -8,6 +8,7 @@
 #include "TodoModel.h"
 #include "Store.h"
 #include "I18n.h"
+#include "Theme.h"
 
 constexpr UINT WM_TRAY     = WM_APP + 1; // 托盘回调消息
 constexpr UINT WM_APP_SHOW = WM_APP + 2; // 第二实例请求显示
@@ -101,6 +102,16 @@ private:
     void  HandleMenuCommand(UINT cmd);
     void  SetLanguage(Lang lang);
 
+    // —— 主题 ——
+    void ReloadThemes();                   // 重扫 %APPDATA%\x-todo\themes\ 自定义主题目录
+    void ApplyResolvedTheme(bool persist); // 读系统明暗 / 高对比 + ResolveTheme + 刷新全部 surface
+    void SetThemeMode(const std::string& mode);  // builtin | custom | follow_system
+    void SetThemeId(const std::string& id);      // 切具体主题（退出 follow_system）
+    void SetFollowSystemThemes(const std::string& lightId, const std::string& darkId);
+    void RefreshTrayIcon();                      // 按当前主题重建托盘图标（NIM_MODIFY）
+    void ShowThemeManager();                     // 打开主题管理窗口
+    const Theme::ThemeVisual& theme() const { return theme_; }
+
     // —— 挂载形态（普通 / 挂桌面 / 侧边胶囊）——
     void        SetMountMode(MountMode m);
     void        ApplyMountMode();
@@ -164,6 +175,12 @@ private:
     TodoModel      model_;
     WindowGeometry geom_;
     UiState        ui_;
+
+    // —— 主题 ——
+    Theme::ThemeVisual              theme_;        // 渲染层唯一读取的已解析主题快照
+    std::vector<Theme::ThemeVisual> customThemes_; // 已加载的自定义主题
+    std::vector<Theme::ThemeIssue>  themeIssues_;  // 自定义主题加载 issue（文件级）
+    std::vector<Theme::ThemeNotice> themeNotices_; // 运行时 notice（fallback / 系统读取 / 托盘失败）
 
     std::vector<RowLayout> rows_;
     float       scroll_       = 0.0f;

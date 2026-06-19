@@ -12,6 +12,11 @@ struct UiState {
     bool alwaysOnTop = true;
     std::string mountMode = "normal"; // normal | desktop | capsule
     std::string lang = "";            // "" 跟随系统；否则 zh | en
+    // 主题：模式 + 当前选择 + 跟随系统时的浅 / 深选择
+    std::string themeMode    = "builtin";  // builtin | custom | follow_system
+    std::string themeId      = "paper";    // builtin / custom 的当前选择
+    std::string lightThemeId = "paper";    // follow_system 浅色
+    std::string darkThemeId  = "graphite"; // follow_system 深色
     // 胶囊形态：外观样式 + 吸附边 + 沿边比例 + 所在显示器
     std::string capsuleStyle    = "slim";  // slim | dot
     std::string capsuleDockEdge = "right"; // left | right
