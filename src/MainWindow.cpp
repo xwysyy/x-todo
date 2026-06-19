@@ -718,7 +718,7 @@ UINT ShowPopupMenu(HWND owner, POINT pt, const std::vector<PopupMenuItem>& items
     return state.result;
 }
 
-// 构造"皮肤"子组。供托盘 / 标题栏菜单复用。
+// 构造标题栏皮肤菜单。
 void AppendThemeMenu(std::vector<PopupMenuItem>& items, Lang lang,
                      const std::string& mode, const std::string& curId,
                      const std::vector<Theme::ThemeVisual>& customs) {
@@ -870,7 +870,6 @@ void MainWindow::ApplyResolvedTheme(bool persist) {
         InvalidateRect(edit_, nullptr, TRUE);
 
     UpdateLayeredState();        // Slim 胶囊透明度使用新主题 slimAlpha
-    RefreshTrayIcon();           // 按主题重建托盘图标
     if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
     if (persist) ScheduleSave();
 }
@@ -1202,7 +1201,7 @@ bool MainWindow::CreateDeviceResources() {
         return false;
     }
     textFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-    textFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    textFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
 
     if (FAILED(dwrite_->CreateTextFormat(
             Theme::kFontFamily, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
@@ -1214,6 +1213,9 @@ bool MainWindow::CreateDeviceResources() {
     smallFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     smallFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
 
+    RebuildLayout();
+    ClampScroll();
+    if (editing()) LayoutEditBox();
     return true;
 }
 
@@ -1238,81 +1240,9 @@ void MainWindow::Resize(UINT w, UINT h) {
 HICON MainWindow::CreateTrayIconHandle() {
     int cx = GetSystemMetrics(SM_CXSMICON);
     int cy = GetSystemMetrics(SM_CYSMICON);
-    if (cx <= 0) cx = 16;
-    if (cy <= 0) cy = 16;
-
-    // 按当前主题用 GDI 绘制托盘小图标；任一步失败都回退到内置 app.ico。
-    HDC screen = GetDC(nullptr);
-    if (!screen) return LoadOwnedAppIcon(cx, cy);
-    HDC memDC = CreateCompatibleDC(screen);
-    HBITMAP colorBmp = CreateCompatibleBitmap(screen, cx, cy);
-    ReleaseDC(nullptr, screen);
-    if (!memDC || !colorBmp) {
-        if (colorBmp) DeleteObject(colorBmp);
-        if (memDC) DeleteDC(memDC);
-        return LoadOwnedAppIcon(cx, cy);
-    }
-    HGDIOBJ oldBmp = SelectObject(memDC, colorBmp);
-
-    RECT rc{ 0, 0, cx, cy };
-    HBRUSH bg = CreateSolidBrush(Theme::GdiColor(theme_.tray.background));
-    ::FillRect(memDC, &rc, bg);
-    DeleteObject(bg);
-
-    // 圆角边框
-    HPEN edgePen = CreatePen(PS_SOLID, 1, Theme::GdiColor(theme_.tray.edge));
-    HGDIOBJ obr = SelectObject(memDC, GetStockObject(NULL_BRUSH));
-    HGDIOBJ op  = SelectObject(memDC, edgePen);
-    int radius = cx / 4;
-    RoundRect(memDC, 0, 0, cx, cy, radius, radius);
-    SelectObject(memDC, op);
-    SelectObject(memDC, obr);
-    DeleteObject(edgePen);
-
-    // 主标记：三条横线（清单意象）
-    HPEN markPen = CreatePen(PS_SOLID, 1, Theme::GdiColor(theme_.tray.mark));
-    HGDIOBJ om = SelectObject(memDC, markPen);
-    int mx = cx / 4, mw = cx - cx / 2;
-    for (int i = 0; i < 3; i++) {
-        int my = cy / 3 + i * (cy / 6);
-        if (my >= cy - 1) break;
-        MoveToEx(memDC, mx, my, nullptr);
-        LineTo(memDC, mx + mw, my);
-    }
-    SelectObject(memDC, om);
-    DeleteObject(markPen);
-
-    // badge：有未完成项时右上角小点
-    if (model_.ActiveCount() > 0) {
-        HBRUSH badgeBr = CreateSolidBrush(Theme::GdiColor(theme_.tray.badge));
-        HGDIOBJ obb = SelectObject(memDC, badgeBr);
-        HGDIOBJ opb = SelectObject(memDC, GetStockObject(NULL_PEN));
-        int d = cx * 5 / 12;
-        Ellipse(memDC, cx - d, 0, cx, d);
-        SelectObject(memDC, opb);
-        SelectObject(memDC, obb);
-        DeleteObject(badgeBr);
-    }
-
-    SelectObject(memDC, oldBmp);
-    DeleteDC(memDC);
-
-    // AND mask 全 0 → 整幅不透明（方形图标）
-    int maskStride = ((cx + 15) / 16) * 2; // 1bpp，WORD 对齐
-    std::vector<BYTE> maskBits((size_t)maskStride * cy, 0);
-    HBITMAP maskBmp = CreateBitmap(cx, cy, 1, 1, maskBits.data());
-    if (!maskBmp) { DeleteObject(colorBmp); return LoadOwnedAppIcon(cx, cy); }
-
-    ICONINFO ii{};
-    ii.fIcon    = TRUE;
-    ii.hbmColor = colorBmp;
-    ii.hbmMask  = maskBmp;
-    HICON icon = CreateIconIndirect(&ii);
-    DeleteObject(colorBmp);
-    DeleteObject(maskBmp);
-
-    if (!icon) return LoadOwnedAppIcon(cx, cy);
-    return icon;
+    if (cx <= 0) cx = 32;
+    if (cy <= 0) cy = 32;
+    return LoadOwnedAppIcon(cx, cy);
 }
 
 bool MainWindow::AddTrayIcon() {
@@ -1341,25 +1271,6 @@ void MainWindow::RemoveTrayIcon() {
     if (nid_.hIcon) {
         DestroyIcon(nid_.hIcon);
         nid_.hIcon = nullptr;
-    }
-}
-
-// 主题切换时按当前主题重建托盘图标。尚未登记时由 AddTrayIcon 负责创建。
-void MainWindow::RefreshTrayIcon() {
-    if (!trayAdded_) return; // 未加入托盘：图标在 AddTrayIcon 内按当前主题创建
-    HICON icon = CreateTrayIconHandle();
-    if (!icon) { // 动态生成 + app.ico 回退都失败
-        themeNotices_.push_back({ lang_ == Lang::Zh ? L"托盘图标生成失败" : L"Tray icon generation failed" });
-        return;
-    }
-    HICON old = nid_.hIcon;
-    nid_.hIcon = icon;
-    if (Shell_NotifyIconW(NIM_MODIFY, &nid_)) {
-        if (old) DestroyIcon(old); // 成功后销毁旧图标
-    } else {
-        nid_.hIcon = old;          // 失败回滚：保留旧图标，销毁新图标
-        DestroyIcon(icon);
-        themeNotices_.push_back({ lang_ == Lang::Zh ? L"托盘图标更新失败" : L"Tray icon update failed" });
     }
 }
 
@@ -1408,13 +1319,11 @@ void MainWindow::ShowTrayMenu() {
         PopupMenuItem{ 30, T(Str::StyleSlim, lang_), false, inCapsule && capsuleStyle_ == CapsuleStyle::Slim, false, true, 1 },
         PopupMenuItem{ 31, T(Str::StyleDot, lang_), false, inCapsule && capsuleStyle_ == CapsuleStyle::Dot, false, true, 1 },
         PopupMenuItem{ 0, L"", true },
+        PopupMenuItem{ 20, T(Str::ToggleLang, lang_) },
+        PopupMenuItem{ 2, T(Str::Autostart, lang_), false, Autostart::IsEnabled() },
+        PopupMenuItem{ 0, L"", true },
+        PopupMenuItem{ 3, T(Str::Exit, lang_), false, false, true },
     };
-    AppendThemeMenu(items, lang_, ui_.themeMode, theme_.id, customThemes_);
-    items.push_back(PopupMenuItem{ 0, L"", true });
-    items.push_back(PopupMenuItem{ 20, T(Str::ToggleLang, lang_) });
-    items.push_back(PopupMenuItem{ 2, T(Str::Autostart, lang_), false, Autostart::IsEnabled() });
-    items.push_back(PopupMenuItem{ 0, L"", true });
-    items.push_back(PopupMenuItem{ 3, T(Str::Exit, lang_), false, false, true });
 
     POINT pt;
     GetCursorPos(&pt);
@@ -1435,13 +1344,11 @@ void MainWindow::ShowTitleMenu() {
         PopupMenuItem{ 30, T(Str::StyleSlim, lang_), false, inCapsule && capsuleStyle_ == CapsuleStyle::Slim, false, true, 1 },
         PopupMenuItem{ 31, T(Str::StyleDot, lang_), false, inCapsule && capsuleStyle_ == CapsuleStyle::Dot, false, true, 1 },
         PopupMenuItem{ 0, L"", true },
+        PopupMenuItem{ 20, T(Str::ToggleLang, lang_) },
+        PopupMenuItem{ 2, T(Str::Autostart, lang_), false, Autostart::IsEnabled() },
+        PopupMenuItem{ 0, L"", true },
+        PopupMenuItem{ 3, T(Str::Exit, lang_), false, false, true },
     };
-    AppendThemeMenu(items, lang_, ui_.themeMode, theme_.id, customThemes_);
-    items.push_back(PopupMenuItem{ 0, L"", true });
-    items.push_back(PopupMenuItem{ 20, T(Str::ToggleLang, lang_) });
-    items.push_back(PopupMenuItem{ 2, T(Str::Autostart, lang_), false, Autostart::IsEnabled() });
-    items.push_back(PopupMenuItem{ 0, L"", true });
-    items.push_back(PopupMenuItem{ 3, T(Str::Exit, lang_), false, false, true });
 
     RECT rc{};
     GetClientRect(hwnd_, &rc);
@@ -1452,6 +1359,19 @@ void MainWindow::ShowTitleMenu() {
     menuOpen_ = false;                 // 必须在 HandleMenuCommand 前清，且无论返回值
     HandleMenuCommand(cmd);
     if (cmd != 3) MaybeCollapseCapsule(); // (R1-F001) 非退出：按真实光标位置补判（cmd==3 已 DestroyWindow）
+}
+
+void MainWindow::ShowThemeMenu() {
+    std::vector<PopupMenuItem> items;
+    AppendThemeMenu(items, lang_, ui_.themeMode, theme_.id, customThemes_);
+
+    POINT pt{ (LONG)themeRect_.right, (LONG)themeRect_.bottom };
+    ClientToScreen(hwnd_, &pt);
+    menuOpen_ = true;
+    UINT cmd = ShowPopupMenu(hwnd_, pt, items, true, theme_, d2dFactory_, dwrite_);
+    menuOpen_ = false;
+    HandleMenuCommand(cmd);
+    if (cmd != 3) MaybeCollapseCapsule();
 }
 
 void MainWindow::SetLanguage(Lang lang) {
@@ -1610,30 +1530,39 @@ void MainWindow::SetCapsuleStyle(CapsuleStyle s) {
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
-// 按当前样式 / 折叠 / hover 维护整窗 alpha：Slim 折叠静止半透明，hover/展开/动画/Dot 不透明
+// 按当前样式 / 折叠 / hover 维护 layered 模式。Slim 用整窗 alpha，Dot 折叠用 per-pixel alpha。
 void MainWindow::UpdateLayeredState() {
-    LONG_PTR ex = GetWindowLongPtrW(hwnd_, GWL_EXSTYLE);
-    const bool wantLayered = (mountMode_ == MountMode::Capsule && capsuleStyle_ == CapsuleStyle::Slim);
-    const bool hasLayered = (ex & WS_EX_LAYERED) != 0;
+    const bool wantSlimAlpha = (mountMode_ == MountMode::Capsule && capsuleStyle_ == CapsuleStyle::Slim);
+    const bool wantDotAlpha  = (mountMode_ == MountMode::Capsule && capsuleStyle_ == CapsuleStyle::Dot && capsuleShrunk());
+    const int wantedMode = wantDotAlpha ? 2 : (wantSlimAlpha ? 1 : 0);
 
-    if (wantLayered) {
-        if (!hasLayered) {
+    if (layeredMode_ != wantedMode) {
+        const int oldMode = layeredMode_;
+        LONG_PTR ex = GetWindowLongPtrW(hwnd_, GWL_EXSTYLE);
+        if ((ex & WS_EX_LAYERED) != 0) {
+            SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, ex & ~WS_EX_LAYERED);
+            SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+            ex = GetWindowLongPtrW(hwnd_, GWL_EXSTYLE);
+        }
+        if (wantedMode != 0) {
             SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, ex | WS_EX_LAYERED);
             SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
                          SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
         }
+        layeredMode_ = wantedMode;
+        if (oldMode == 2 || wantedMode == 2) DiscardDeviceResources();
+    }
+
+    if (wantedMode == 1) {
         BYTE alpha = (capsuleShrunk() && !capsuleHover_)
                      ? (BYTE)(theme_.capsule.slimAlpha * 255.0f) : 255;
         SetLayeredWindowAttributes(hwnd_, 0, alpha, LWA_ALPHA);
-    } else if (hasLayered) {
-        SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, ex & ~WS_EX_LAYERED);
-        SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     }
     UpdateCapsuleRegion(); // 形态 / 样式 / 折叠变化时同步窗口区域与 DWM 边界属性
 }
 
-// Dot 折叠态用 window region 定形成圆点；Slim 折叠态交给 DWM 圆角合成，避免 GDI region 硬边。
+// Dot 折叠态由 per-pixel layered alpha 定形；Slim 折叠态交给 DWM 圆角合成，避免 GDI region 硬边。
 // 折叠态压制 DWM 边框线；其余形态恢复矩形 + ROUND。
 void MainWindow::UpdateCapsuleRegion() {
     const bool slimShrunk = mountMode_ == MountMode::Capsule
@@ -1641,7 +1570,6 @@ void MainWindow::UpdateCapsuleRegion() {
     const bool dotShrunk  = mountMode_ == MountMode::Capsule
                             && capsuleStyle_ == CapsuleStyle::Dot  && capsuleShrunk();
     const bool suppressBorder = slimShrunk || dotShrunk;
-    const bool regionShrunk = dotShrunk;
 
     int corner = dotShrunk ? 1 : 2; // 1=DWMWCP_DONOTROUND, 2=DWMWCP_ROUND
     DwmSetWindowAttribute(hwnd_, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
@@ -1649,21 +1577,7 @@ void MainWindow::UpdateCapsuleRegion() {
     COLORREF border = suppressBorder ? 0xFFFFFFFE /* DWMWA_COLOR_NONE */
                                      : 0xFFFFFFFF /* DWMWA_COLOR_DEFAULT */;
     DwmSetWindowAttribute(hwnd_, DWMWA_BORDER_COLOR, &border, sizeof(border));
-
-    HRGN rgn = nullptr;
-    if (dotShrunk) {
-        RECT rc; GetClientRect(hwnd_, &rc);
-        rgn = CreateEllipticRgn(0, 0, rc.right - rc.left + 1, rc.bottom - rc.top + 1);
-    }
-
-    if (regionShrunk) {
-        // 创建失败：显式清旧 region（退化矩形），不残留上一样式的椭圆
-        if (!rgn) { SetWindowRgn(hwnd_, nullptr, TRUE); return; }
-        // SetWindowRgn 失败时系统未接管，调用方仍拥有 HRGN，须释放；并清旧 region 退化矩形
-        if (!SetWindowRgn(hwnd_, rgn, TRUE)) { DeleteObject(rgn); SetWindowRgn(hwnd_, nullptr, TRUE); }
-    } else {
-        SetWindowRgn(hwnd_, nullptr, TRUE); // 其余形态恢复矩形窗口
-    }
+    SetWindowRgn(hwnd_, nullptr, TRUE);
 }
 
 void MainWindow::BeginCapsulePress(int x, int y) {

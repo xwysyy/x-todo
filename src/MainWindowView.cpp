@@ -2,9 +2,11 @@
 #include "Theme.h"
 
 #include <commctrl.h>
+#include <cmath>
 #include <cstdio>
 #include <cwchar>
 #include <string>
+#include <utility>
 
 namespace {
 bool InRect(const D2D1_RECT_F& r, D2D1_POINT_2F p) {
@@ -20,21 +22,50 @@ std::wstring Trim(const std::wstring& s) {
 int RoundToInt(float v) { return (int)(v >= 0.0f ? v + 0.5f : v - 0.5f); }
 constexpr int kHoverAddRow = -2;
 
-// 段落居中时 DWrite 实际渲染的基线相对框顶的 y（用于让浮动 EDIT 的文字基线与渲染态对齐）
-float DWriteBaselineInBox(IDWriteFactory* dwrite, IDWriteTextFormat* format,
-                          const std::wstring& text, float boxW, float boxH) {
-    if (!dwrite || !format) return boxH * 0.5f;
-    const std::wstring probe = text.empty() ? L"Hg" : text + L"Hg";
-    IDWriteTextLayout* layout = nullptr;
-    if (FAILED(dwrite->CreateTextLayout(probe.c_str(), (UINT32)probe.size(), format,
-                                        boxW > 1.0f ? boxW : 1.0f,
-                                        boxH > 1.0f ? boxH : 1.0f, &layout)))
-        return boxH * 0.5f;
-    DWRITE_LINE_METRICS lm{}; UINT32 actual = 0; float baseline = boxH * 0.5f;
-    if (SUCCEEDED(layout->GetLineMetrics(&lm, 1, &actual)) && actual > 0)
-        baseline = (boxH - lm.height) * 0.5f + lm.baseline; // lineTop = (boxH - lm.height)/2
-    layout->Release();
-    return baseline;
+std::wstring ReadWindowText(HWND hwnd) {
+    int len = GetWindowTextLengthW(hwnd);
+    if (len <= 0) return L"";
+    std::wstring text((size_t)len + 1, L'\0');
+    int got = GetWindowTextW(hwnd, text.data(), len + 1);
+    if (got < 0) got = 0;
+    text.resize((size_t)got);
+    return text;
+}
+
+std::wstring NormalizeTodoText(std::wstring text) {
+    for (wchar_t& ch : text) {
+        if (ch == L'\r' || ch == L'\n' || ch == L'\t') ch = L' ';
+    }
+    return Trim(text);
+}
+
+bool IsWrapDelimiter(wchar_t ch) {
+    switch (ch) {
+    case L'/': case L'\\': case L'.': case L'-': case L'_':
+    case L'?': case L'&': case L'=': case L'#': case L':':
+        return true;
+    default:
+        return false;
+    }
+}
+
+std::wstring MakeBreakableText(const std::wstring& text) {
+    std::wstring out;
+    out.reserve(text.size() + text.size() / 16);
+    int run = 0;
+    for (wchar_t ch : text) {
+        out.push_back(ch);
+        if (ch == L' ' || ch == L'\t' || ch == L'\r' || ch == L'\n') {
+            run = 0;
+            continue;
+        }
+        run++;
+        if (IsWrapDelimiter(ch) || run >= 24) {
+            out.push_back(L'\x200B');
+            run = 0;
+        }
+    }
+    return out;
 }
 } // namespace
 
@@ -79,7 +110,7 @@ void MainWindow::RebuildLayout() {
     float W = (float)(rc.right - rc.left);
 
     const float pad     = S(Theme::kPadX);
-    const float rowH    = S(Theme::kRowH);
+    const float baseRowH = S(Theme::kRowH);
     const float checkSz = S(Theme::kCheckSize);
     const float handleW = S(18);
     const float delW    = S(20);
@@ -93,20 +124,31 @@ void MainWindow::RebuildLayout() {
         RowLayout r{};
         r.itemIndex = itemIndex;
         r.completed = completed;
+        const float textLeft = pad + checkSz + S(8);
+        float textRight = W - pad - handleW - gap - delW - gap;
+        if (textRight < textLeft + S(20)) textRight = textLeft + S(20);
+        std::wstring measureText;
+        const std::wstring& savedText = model_.Items()[itemIndex].text;
+        const std::wstring* text = &savedText;
+        if (editing() && editIndex_ == itemIndex && edit_) {
+            measureText = ReadWindowText(edit_);
+            text = &measureText;
+        }
+        const float rowH = MeasureRowHeight(*text, textRight - textLeft);
         r.row    = D2D1::RectF(pad, docY, W - pad, docY + rowH);
-        float cy = docY + rowH / 2;
-        r.check  = D2D1::RectF(pad, cy - checkSz / 2, pad + checkSz, cy + checkSz / 2);
-        r.handle = D2D1::RectF(W - pad - handleW, docY, W - pad, docY + rowH);
-        r.del    = D2D1::RectF(r.handle.left - gap - delW, cy - delW / 2, r.handle.left - gap, cy + delW / 2);
-        r.text   = D2D1::RectF(r.check.right + S(8), docY, r.del.left - gap, docY + rowH);
+        const float controlTop = docY + S(7);
+        r.check  = D2D1::RectF(pad, docY + S(8), pad + checkSz, docY + S(8) + checkSz);
+        r.handle = D2D1::RectF(W - pad - handleW, controlTop, W - pad, controlTop + S(20));
+        r.del    = D2D1::RectF(r.handle.left - gap - delW, controlTop, r.handle.left - gap, controlTop + delW);
+        r.text   = D2D1::RectF(textLeft, docY, textRight, docY + rowH);
         rows_.push_back(r);
         docY += rowH;
     };
 
     for (int i = 0; i < active; i++) makeRow(i, false);
 
-    addRect_ = D2D1::RectF(pad, docY, W - pad, docY + rowH);
-    docY += rowH;
+    addRect_ = D2D1::RectF(pad, docY, W - pad, docY + baseRowH);
+    docY += baseRowH;
 
     if (total - active > 0) {
         sectionRect_ = D2D1::RectF(pad, docY, W - pad, docY + S(Theme::kSectionH));
@@ -125,7 +167,27 @@ void MainWindow::RebuildLayout() {
     const float ty  = (S(Theme::kTitleH) - btn) / 2;
     closeRect_ = D2D1::RectF(W - m - btn, ty, W - m, ty + btn);
     pinRect_   = D2D1::RectF(closeRect_.left - S(4) - btn, ty, closeRect_.left - S(4), ty + btn);
-    menuRect_  = D2D1::RectF(pinRect_.left - S(4) - btn, ty, pinRect_.left - S(4), ty + btn);
+    themeRect_ = D2D1::RectF(pinRect_.left - S(4) - btn, ty, pinRect_.left - S(4), ty + btn);
+    menuRect_  = D2D1::RectF(themeRect_.left - S(4) - btn, ty, themeRect_.left - S(4), ty + btn);
+}
+
+float MainWindow::MeasureRowHeight(const std::wstring& text, float textWidth) {
+    const float base = S(Theme::kRowH);
+    if (!dwrite_ || !textFormat_ || text.empty() || textWidth <= S(8)) return base;
+
+    IDWriteTextLayout* layout = nullptr;
+    std::wstring breakable = MakeBreakableText(text);
+    HRESULT hr = dwrite_->CreateTextLayout(breakable.c_str(), (UINT32)breakable.size(), textFormat_,
+                                           textWidth, S(2000), &layout);
+    if (FAILED(hr) || !layout) return base;
+    DWRITE_TEXT_METRICS tm{};
+    float h = base;
+    if (SUCCEEDED(layout->GetMetrics(&tm))) {
+        float want = (float)std::ceil(tm.height + S(14));
+        if (want > h) h = want;
+    }
+    layout->Release();
+    return h;
 }
 
 // ——————————————————————————— 命中测试 ———————————————————————————
@@ -136,6 +198,7 @@ MainWindow::Hit MainWindow::HitTest(float x, float y) {
 
     if (y < S(Theme::kTitleH)) {
         if (InRect(menuRect_, p))  { h.kind = HitKind::Menu;  return h; }
+        if (InRect(themeRect_, p)) { h.kind = HitKind::Theme; return h; }
         if (InRect(pinRect_, p))   { h.kind = HitKind::Pin;   return h; }
         if (InRect(closeRect_, p)) { h.kind = HitKind::Close; return h; }
         return h; // 标题栏空白 -> 交给 NCHITTEST 拖动
@@ -214,13 +277,14 @@ void MainWindow::DrawRow(const RowLayout& r, bool hovered) {
 
     if (!(editing() && editIndex_ == r.itemIndex)) {
         const std::wstring& s = model_.Items()[r.itemIndex].text;
+        std::wstring breakable = MakeBreakableText(s);
         if (r.completed) {
             if (!r.strikeLayout && !s.empty()) { // 仅首帧创建带删除线的布局，之后复用
                 IDWriteTextLayout* layout = nullptr;
-                if (SUCCEEDED(dwrite_->CreateTextLayout(s.c_str(), (UINT32)s.size(), textFormat_,
+                if (SUCCEEDED(dwrite_->CreateTextLayout(breakable.c_str(), (UINT32)breakable.size(), textFormat_,
                                                         r.text.right - r.text.left,
                                                         r.text.bottom - r.text.top, &layout))) {
-                    DWRITE_TEXT_RANGE rg{ 0, (UINT32)s.size() };
+                    DWRITE_TEXT_RANGE rg{ 0, (UINT32)breakable.size() };
                     layout->SetStrikethrough(TRUE, rg);
                     r.strikeLayout = layout;
                 }
@@ -230,7 +294,7 @@ void MainWindow::DrawRow(const RowLayout& r, bool hovered) {
                 rt_->DrawTextLayout(D2D1::Point2F(r.text.left, r.text.top), r.strikeLayout, brush_);
             }
         } else {
-            Text(s, r.text, theme_.colors.text, textFormat_);
+            Text(breakable, r.text, theme_.colors.text, textFormat_);
         }
     }
 
@@ -274,7 +338,6 @@ void MainWindow::DrawTitleBar() {
     D2D1_RECT_F tr = D2D1::RectF(S(Theme::kPadX), 0, menuRect_.left - S(8), S(Theme::kTitleH));
     Text(L"X-TODO", tr, theme_.colors.textWeak, smallFormat_);
 
-    // 菜单按钮：三条横线
     brush_->SetColor(Theme::D2DColor(theme_.colors.textWeak));
     {
         float mcx = (menuRect_.left + menuRect_.right) / 2;
@@ -284,6 +347,17 @@ void MainWindow::DrawTitleBar() {
             rt_->DrawLine(D2D1::Point2F(mcx - S(6), yy), D2D1::Point2F(mcx + S(6), yy), brush_, S(1.5f));
         }
     }
+
+    D2D1_POINT_2F tc = D2D1::Point2F((themeRect_.left + themeRect_.right) / 2,
+                                     (themeRect_.top + themeRect_.bottom) / 2);
+    D2D1_ELLIPSE te = D2D1::Ellipse(tc, S(6), S(6));
+    brush_->SetColor(Theme::D2DColor(theme_.colors.checkFill));
+    rt_->FillEllipse(te, brush_);
+    brush_->SetColor(Theme::D2DColor(theme_.colors.paperEdge));
+    rt_->DrawEllipse(te, brush_, S(1.2f));
+    brush_->SetColor(Theme::D2DColor(theme_.colors.checkMark));
+    rt_->DrawLine(D2D1::Point2F(tc.x - S(3), tc.y + S(1)),
+                  D2D1::Point2F(tc.x + S(3), tc.y - S(3)), brush_, S(1.3f));
 
     D2D1_POINT_2F pc = D2D1::Point2F((pinRect_.left + pinRect_.right) / 2,
                                      (pinRect_.top + pinRect_.bottom) / 2);
@@ -320,6 +394,9 @@ void MainWindow::DrawAddRow(bool hovered) {
 }
 
 bool MainWindow::Render() {
+    if (capsuleShrunk() && capsuleStyle_ == CapsuleStyle::Dot)
+        return RenderDotCapsuleLayered();
+
     if (!CreateDeviceResources()) return false;
 
     RECT rc;
@@ -330,25 +407,17 @@ bool MainWindow::Render() {
         rt_->BeginDraw();
         rt_->SetTransform(D2D1::Matrix3x2F::Identity());
         const int n = model_.ActiveCount();
-        if (capsuleStyle_ == CapsuleStyle::Dot) {
-            // 圆点：整窗填色，由椭圆窗口区域裁成圆；hover 加深作可见提示
-            uint32_t c = capsuleHover_ ? (n > 0 ? theme_.capsule.dotActiveHover : theme_.capsule.dotIdleHover)
-                                       : (n > 0 ? theme_.capsule.dotActive : theme_.capsule.dotIdle);
-            rt_->Clear(Theme::D2DColor(c));
-        } else {
-            // 细边：纸色圆角竖条 + 居中数字（半透明由窗口 alpha 表达，绘制不改色）
-            rt_->Clear(Theme::D2DColor(theme_.capsule.slimPaper));
-            const float radius = W < H ? W * 0.5f : H * 0.5f;
-            D2D1_ROUNDED_RECT rr{ D2D1::RectF(0.75f, 0.75f, W - 0.75f, H - 0.75f), radius, radius };
-            brush_->SetColor(Theme::D2DColor(theme_.capsule.slimEdge));
-            rt_->DrawRoundedRectangle(rr, brush_, S(1.5f));
-            wchar_t buf[16];
-            swprintf_s(buf, L"%d", n);
-            brush_->SetColor(Theme::D2DColor(n > 0 ? theme_.capsule.slimText : theme_.colors.textWeak));
-            smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-            rt_->DrawTextW(buf, (UINT32)wcslen(buf), smallFormat_, D2D1::RectF(0, 0, W, H), brush_);
-            smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-        }
+        rt_->Clear(Theme::D2DColor(theme_.capsule.slimPaper));
+        const float radius = W < H ? W * 0.5f : H * 0.5f;
+        D2D1_ROUNDED_RECT rr{ D2D1::RectF(0.75f, 0.75f, W - 0.75f, H - 0.75f), radius, radius };
+        brush_->SetColor(Theme::D2DColor(theme_.capsule.slimEdge));
+        rt_->DrawRoundedRectangle(rr, brush_, S(1.5f));
+        wchar_t buf[16];
+        swprintf_s(buf, L"%d", n);
+        brush_->SetColor(Theme::D2DColor(n > 0 ? theme_.capsule.slimText : theme_.colors.textWeak));
+        smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        rt_->DrawTextW(buf, (UINT32)wcslen(buf), smallFormat_, D2D1::RectF(0, 0, W, H), brush_);
+        smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         if (rt_->EndDraw() == (HRESULT)D2DERR_RECREATE_TARGET) {
             DiscardDeviceResources();
             return false;
@@ -371,7 +440,10 @@ bool MainWindow::Render() {
     DrawSection();
 
     if (dragging_ && dragInsert_ >= 0) {
-        float yy = dragInsert_ * S(Theme::kRowH);
+        float yy = addRect_.top;
+        for (const RowLayout& r : rows_) {
+            if (!r.completed && r.itemIndex == dragInsert_) { yy = r.row.top; break; }
+        }
         brush_->SetColor(Theme::D2DColor(theme_.colors.focusRing));
         rt_->DrawLine(D2D1::Point2F(S(Theme::kPadX), yy),
                       D2D1::Point2F(W - S(Theme::kPadX), yy), brush_, S(2));
@@ -389,6 +461,79 @@ bool MainWindow::Render() {
         return false;
     }
     return true;
+}
+
+bool MainWindow::RenderDotCapsuleLayered() {
+    if (layeredMode_ != 2) UpdateLayeredState();
+
+    RECT client{};
+    GetClientRect(hwnd_, &client);
+    const int w = client.right - client.left;
+    const int h = client.bottom - client.top;
+    if (w <= 0 || h <= 0) return false;
+
+    const int n = model_.ActiveCount();
+    const uint32_t rgb = capsuleHover_
+        ? (n > 0 ? theme_.capsule.dotActiveHover : theme_.capsule.dotIdleHover)
+        : (n > 0 ? theme_.capsule.dotActive : theme_.capsule.dotIdle);
+    const int r = (rgb >> 16) & 0xff;
+    const int g = (rgb >> 8) & 0xff;
+    const int b = rgb & 0xff;
+
+    BITMAPINFO bi{};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = nullptr;
+    HDC screen = GetDC(nullptr);
+    if (!screen) return false;
+    HBITMAP bmp = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    HDC mem = CreateCompatibleDC(screen);
+    if (!bmp || !mem || !bits) {
+        if (mem) DeleteDC(mem);
+        if (bmp) DeleteObject(bmp);
+        ReleaseDC(nullptr, screen);
+        return false;
+    }
+
+    uint32_t* px = static_cast<uint32_t*>(bits);
+    const double cx = w * 0.5;
+    const double cy = h * 0.5;
+    const double radius = (w < h ? w : h) * 0.5 - 0.5;
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            const double dx = (x + 0.5) - cx;
+            const double dy = (y + 0.5) - cy;
+            const double dist = std::sqrt(dx * dx + dy * dy);
+            double cover = radius + 0.5 - dist;
+            if (cover < 0.0) cover = 0.0;
+            if (cover > 1.0) cover = 1.0;
+            const int a = (int)(cover * 255.0 + 0.5);
+            const int pr = (r * a + 127) / 255;
+            const int pg = (g * a + 127) / 255;
+            const int pb = (b * a + 127) / 255;
+            px[y * w + x] = ((uint32_t)a << 24) | ((uint32_t)pr << 16) |
+                            ((uint32_t)pg << 8) | (uint32_t)pb;
+        }
+    }
+
+    HGDIOBJ old = SelectObject(mem, bmp);
+    RECT wr{};
+    GetWindowRect(hwnd_, &wr);
+    POINT dst{ wr.left, wr.top };
+    POINT src{ 0, 0 };
+    SIZE size{ w, h };
+    BLENDFUNCTION blend{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    BOOL ok = UpdateLayeredWindow(hwnd_, screen, &dst, &size, mem, &src, 0, &blend, ULW_ALPHA);
+    SelectObject(mem, old);
+    DeleteDC(mem);
+    DeleteObject(bmp);
+    ReleaseDC(nullptr, screen);
+    return ok != FALSE;
 }
 
 // ——————————————————————————— 鼠标 / 键盘 ———————————————————————————
@@ -446,6 +591,7 @@ void MainWindow::OnLButtonUp(float x, float y) {
     case HitKind::Section: ToggleCompletedExpanded(); break;
     case HitKind::Clear:   ClearCompletedConfirm();   break;
     case HitKind::Menu:    ShowTitleMenu();           break;
+    case HitKind::Theme:   ShowThemeMenu();           break;
     case HitKind::Pin:     TogglePin();               break;
     case HitKind::Close:   HideToTray();              break;
     case HitKind::Add: {
@@ -468,9 +614,9 @@ void MainWindow::OnMouseMove(float x, float y, bool lButton) {
         float docY = y - ContentTop() + scroll_;
         int active = model_.ActiveCount();
         int insert = active;
-        float rowH = S(Theme::kRowH);
-        for (int i = 0; i < active; i++) {
-            if (docY < i * rowH + rowH / 2) { insert = i; break; }
+        for (const RowLayout& r : rows_) {
+            if (r.completed) break;
+            if (docY < (r.row.top + r.row.bottom) / 2) { insert = r.itemIndex; break; }
         }
         dragInsert_ = insert;
         InvalidateRect(hwnd_, nullptr, FALSE);
@@ -507,7 +653,8 @@ LRESULT MainWindow::OnNcHitTest(int sx, int sy) {
     GetClientRect(hwnd_, &rc);
     // 标题栏按钮优先于缩放边缘：避免加宽 resize 边后吞掉按钮顶部像素
     D2D1_POINT_2F bpt{ (float)p.x, (float)p.y };
-    if (InRect(menuRect_, bpt) || InRect(pinRect_, bpt) || InRect(closeRect_, bpt))
+    if (InRect(menuRect_, bpt) || InRect(themeRect_, bpt) ||
+        InRect(pinRect_, bpt) || InRect(closeRect_, bpt))
         return HTCLIENT;
     float e = S(Theme::kResizeEdge);
     bool L = p.x < e, R = p.x >= rc.right - e, T = p.y < e, B = p.y >= rc.bottom - e;
@@ -522,7 +669,8 @@ LRESULT MainWindow::OnNcHitTest(int sx, int sy) {
 
     if (p.y < S(Theme::kTitleH)) {
         D2D1_POINT_2F pt{ (float)p.x, (float)p.y };
-        if (InRect(menuRect_, pt) || InRect(pinRect_, pt) || InRect(closeRect_, pt)) return HTCLIENT;
+        if (InRect(menuRect_, pt) || InRect(themeRect_, pt) ||
+            InRect(pinRect_, pt) || InRect(closeRect_, pt)) return HTCLIENT;
         if (mountMode_ == MountMode::Capsule) return HTCLIENT;
         return HTCAPTION;
     }
@@ -539,7 +687,7 @@ void MainWindow::BeginEdit(int itemIndex) {
     editIndex_ = itemIndex;
 
     if (!edit_) {
-        edit_ = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | ES_AUTOHSCROLL,
+        edit_ = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | ES_MULTILINE | ES_AUTOVSCROLL,
                                 0, 0, 10, 10, hwnd_, nullptr, GetModuleHandleW(nullptr), nullptr);
         SetWindowSubclass(edit_, EditProcStatic, 1, (DWORD_PTR)this);
     }
@@ -567,12 +715,10 @@ void MainWindow::CommitEdit(bool addNext) {
     int idx = editIndex_;
     editIndex_ = -1;
 
-    int len = GetWindowTextLengthW(edit_);
-    std::wstring text(len, L'\0');
-    if (len) GetWindowTextW(edit_, text.data(), len + 1);
+    std::wstring text = ReadWindowText(edit_);
     ShowWindow(edit_, SW_HIDE);
 
-    text = Trim(text);
+    text = NormalizeTodoText(std::move(text));
     if (text.empty()) model_.Remove(idx);
     else              model_.SetText(idx, text);
 
@@ -630,34 +776,10 @@ void MainWindow::LayoutEditBox() {
         const int width  = RoundToInt(r.text.right - r.text.left);
         if (rowH <= 0 || width <= 0) return;
 
-        TEXTMETRICW tm{};
-        bool haveGdi = false;
-        if (editFont_) {
-            HDC hdc = GetDC(edit_);
-            if (hdc) {
-                HFONT oldFont = (HFONT)SelectObject(hdc, editFont_);
-                haveGdi = GetTextMetricsW(hdc, &tm) != FALSE;
-                SelectObject(hdc, oldFont);
-                ReleaseDC(edit_, hdc);
-            }
-        }
-        if (!haveGdi) tm.tmAscent = RoundToInt(S(Theme::kFontSize) * 0.8f);
-
-        const std::wstring& cur =
-            (editIndex_ >= 0 && editIndex_ < model_.Count())
-                ? model_.Items()[editIndex_].text : std::wstring();
-        const float targetBaseline =
-            DWriteBaselineInBox(dwrite_, textFormat_, cur, (float)width, (float)rowH);
-
-        // 先以整行高放置，让单行 EDIT 建立格式化矩形
         MoveWindow(edit_, left, rowTop, width, rowH, FALSE);
-        RECT fmt{};
-        SendMessageW(edit_, EM_GETRECT, 0, (LPARAM)&fmt);
-        if (fmt.bottom <= fmt.top) fmt.top = 0;
-
-        // 单行 EDIT 文字基线在客户顶下方 (fmt.top + tmAscent)；令其与渲染基线 targetBaseline 对齐
-        const int top = rowTop + RoundToInt(targetBaseline) - (fmt.top + (int)tm.tmAscent);
-        MoveWindow(edit_, left, top, width, rowH, TRUE);
+        RECT fmt{ 0, RoundToInt(S(5)), width, rowH };
+        SendMessageW(edit_, EM_SETRECTNP, 0, (LPARAM)&fmt);
+        MoveWindow(edit_, left, rowTop, width, rowH, TRUE);
         return;
     }
 }
@@ -665,14 +787,37 @@ void MainWindow::LayoutEditBox() {
 LRESULT CALLBACK MainWindow::EditProcStatic(HWND h, UINT m, WPARAM w, LPARAM l,
                                             UINT_PTR id, DWORD_PTR ref) {
     MainWindow* self = reinterpret_cast<MainWindow*>(ref);
+    auto refresh = [&]() {
+        self->RebuildLayout();
+        self->ClampScroll();
+        self->LayoutEditBox();
+        InvalidateRect(self->hwnd_, nullptr, FALSE);
+    };
     switch (m) {
     case WM_KEYDOWN:
         if (w == VK_RETURN) { self->CommitEdit(true);  return 0; }
         if (w == VK_ESCAPE) { self->CancelEdit();      return 0; }
+        if (w == VK_DELETE) {
+            LRESULT r = DefSubclassProc(h, m, w, l);
+            refresh();
+            return r;
+        }
         break;
     case WM_CHAR:
         if (w == 0x0D || w == 0x1B) return 0; // 吞掉回车/Esc 的字符，避免提示音
-        break;
+        {
+            LRESULT r = DefSubclassProc(h, m, w, l);
+            refresh();
+            return r;
+        }
+    case WM_PASTE:
+    case WM_CUT:
+    case WM_CLEAR:
+    case WM_UNDO: {
+        LRESULT r = DefSubclassProc(h, m, w, l);
+        refresh();
+        return r;
+    }
     case WM_KILLFOCUS:
         self->CommitEdit(false);
         break;

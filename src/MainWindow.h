@@ -42,6 +42,7 @@ private:
     bool CreateDeviceResources();
     void DiscardDeviceResources();
     bool Render(); // 返回 false 表示设备丢失等，本帧未成功绘制
+    bool RenderDotCapsuleLayered(); // Dot 折叠态：per-pixel alpha 抗锯齿圆点
     void Resize(UINT w, UINT h);
 
     // —— 布局与命中 ——
@@ -55,10 +56,11 @@ private:
         D2D1_RECT_F handle;
         mutable IDWriteTextLayout* strikeLayout = nullptr; // 完成项删除线布局，首帧创建后缓存
     };
-    enum class HitKind { None, Check, Text, Delete, Handle, Section, Clear, Add, Pin, Close, Menu };
+    enum class HitKind { None, Check, Text, Delete, Handle, Section, Clear, Add, Pin, Close, Menu, Theme };
     struct Hit { HitKind kind = HitKind::None; int rowIndex = -1; int itemIndex = -1; };
 
     void  RebuildLayout();
+    float MeasureRowHeight(const std::wstring& text, float textWidth);
     float ContentHeight() const;
     void  ClampScroll();
     void  ScrollItemIntoView(int itemIndex);
@@ -99,6 +101,7 @@ private:
     HICON CreateTrayIconHandle();
     void  ShowTrayMenu();
     void  ShowTitleMenu();                 // 标题栏菜单按钮弹出
+    void  ShowThemeMenu();                 // 标题栏皮肤按钮弹出
     void  HandleMenuCommand(UINT cmd);
     void  SetLanguage(Lang lang);
 
@@ -108,7 +111,6 @@ private:
     void SetThemeMode(const std::string& mode);  // builtin | custom | follow_system
     void SetThemeId(const std::string& id);      // 切具体主题（退出 follow_system）
     void SetFollowSystemThemes(const std::string& lightId, const std::string& darkId);
-    void RefreshTrayIcon();                      // 按当前主题重建托盘图标（NIM_MODIFY）
     void ShowThemeManager();                     // 打开主题管理窗口
     const Theme::ThemeVisual& theme() const { return theme_; }
 
@@ -191,6 +193,7 @@ private:
     D2D1_RECT_F pinRect_{};     // 置顶按钮（固定）
     D2D1_RECT_F closeRect_{};   // 关闭按钮（固定）
     D2D1_RECT_F menuRect_{};    // 标题栏菜单按钮（固定）
+    D2D1_RECT_F themeRect_{};   // 标题栏皮肤按钮（固定）
 
     int   hoverRow_   = -1;
     int   editIndex_  = -1;
@@ -214,6 +217,7 @@ private:
     bool      capsuleDragging_ = false;  // 折叠胶囊：已越过阈值进入拖动
     bool      capsuleHover_    = false;  // 折叠胶囊：鼠标悬停视觉提示
     bool      menuOpen_        = false;  // 弹出菜单存活期间：抑制 WM_MOUSELEAVE 误触收缩
+    int       layeredMode_     = 0;      // 0=none, 1=constant alpha, 2=per-pixel alpha
     POINT     capsulePressClient_{};     // 按下点（客户坐标，拖动时窗口跟随）
     POINT     capsulePressScreen_{};     // 按下点（屏幕坐标，阈值判定）
     RECT      animFrom_{};
