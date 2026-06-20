@@ -50,7 +50,7 @@ Open [Releases](https://github.com/xwysyy/X-TODO/releases), download `x-todo.exe
 
 | Action | How |
 | :-- | :-- |
-| Add | Click "＋ New item" at the bottom, type, press Enter to keep going |
+| Add | Click "＋ New item" at the bottom, or press Enter while editing to insert after the current item and its children |
 | Done / undo | Click the box in front of an item; child items move with it as one block |
 | Edit | Click the item text and type |
 | Indent / outdent | Edit an active item, then press Tab or Shift+Tab |

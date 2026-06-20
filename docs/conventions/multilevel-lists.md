@@ -27,6 +27,11 @@ tray menu. The edit control handles `Tab` as indent and `Shift+Tab` as outdent.
 Indenting uses the previous visible active row as the parent candidate. Hidden
 descendants under a collapsed item must not affect the parent chosen by `Tab`.
 
+Pressing `Enter` while editing an active item inserts a new empty active item
+after the edited item's whole subtree. The new item starts at the edited item's
+level. Pressing `Tab` on that new item nests it one level deeper. The bottom add
+row still appends to the active section.
+
 Checking an item applies to that item and its subtree. Deleting an item removes
 that item and its subtree. Dragging an item moves the whole subtree as one
 block inside the active section.

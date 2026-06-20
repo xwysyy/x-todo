@@ -82,11 +82,20 @@ int TodoModel::TotalActiveCount() const {
 
 int TodoModel::AddActive(const std::wstring& text, int level) {
     TodoList& list = CurrentListMutable();
-    int at = list.activeCount;
+    return InsertActive(list.activeCount, text, level);
+}
+
+int TodoModel::InsertActive(int index, const std::wstring& text, int level) {
+    TodoList& list = CurrentListMutable();
+    int at = index;
+    if (at < 0) at = 0;
+    if (at > list.activeCount) at = list.activeCount;
     if (level < 0)
         level = (at > 0) ? list.items[(size_t)at - 1].level : 0;
     list.items.insert(list.items.begin() + at, TodoItem{ text, false, ClampTodoLevel(level), false });
     ++list.activeCount;
+    NormalizeLevels(list.items, 0, list.activeCount);
+    NormalizeCollapsed(list);
     return at;
 }
 

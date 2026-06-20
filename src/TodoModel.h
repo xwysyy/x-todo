@@ -37,6 +37,7 @@ public:
     int TotalActiveCount() const;
 
     int  AddActive(const std::wstring& text, int level = -1); // 未完成段末尾追加，返回其下标
+    int  InsertActive(int index, const std::wstring& text, int level = -1); // 未完成段指定位置插入
     void SetText(int index, const std::wstring& text);
     void Remove(int index);                   // 删除该项及其子树
     void SetDone(int index, bool done);       // 勾选 / 还原该项及其子树，以独立块重排到对应段

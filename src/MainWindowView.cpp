@@ -932,7 +932,8 @@ void MainWindow::CommitEdit(bool addNext) {
 
     if (addNext && !text.empty()) {
         int nextLevel = (idx >= 0 && idx < model_.Count()) ? model_.Items()[idx].level : 0;
-        int n = model_.AddActive(L"", nextLevel);
+        int insertAt = (idx >= 0 && idx < model_.ActiveCount()) ? model_.SubtreeEnd(idx) : model_.ActiveCount();
+        int n = model_.InsertActive(insertAt, L"", nextLevel);
         RebuildLayout();
         ScrollItemIntoView(n);
         RefreshTrayIcon();
