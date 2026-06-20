@@ -516,11 +516,22 @@ struct PromptState {
     HBRUSH editBrush = nullptr;
 };
 
-RECT PromptEditRect(const PromptState& s) {
+RECT PromptEditFrameRect(const PromptState& s) {
     int pad = DpiPx(s.owner, 14);
     int top = DpiPx(s.owner, 38);
     int h = DpiPx(s.owner, 28);
     return RECT{ pad, top, s.w - pad, top + h };
+}
+
+RECT PromptEditChildRect(const PromptState& s) {
+    RECT r = PromptEditFrameRect(s);
+    int insetX = DpiPx(s.owner, 3);
+    int insetY = DpiPx(s.owner, 2);
+    r.left += insetX;
+    r.top += insetY;
+    r.right -= insetX;
+    r.bottom -= insetY;
+    return r;
 }
 
 RECT PromptOkRect(const PromptState& s) {
@@ -592,7 +603,7 @@ LRESULT CALLBACK PromptProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
     switch (msg) {
     case WM_CREATE: {
-        RECT er = PromptEditRect(*s);
+        RECT er = PromptEditChildRect(*s);
         s->edit = CreateWindowExW(0, L"EDIT", s->value.c_str(),
                                   WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
                                   er.left, er.top, er.right - er.left, er.bottom - er.top,
@@ -611,7 +622,7 @@ LRESULT CALLBACK PromptProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     case WM_SIZE:
         if (s->edit) {
-            RECT er = PromptEditRect(*s);
+            RECT er = PromptEditChildRect(*s);
             MoveWindow(s->edit, er.left, er.top, er.right - er.left, er.bottom - er.top, TRUE);
         }
         return 0;
@@ -638,10 +649,12 @@ LRESULT CALLBACK PromptProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         s->brush->SetColor(Theme::Color(s->theme.colors.text));
         s->rt->DrawTextW(s->prompt.c_str(), (UINT32)s->prompt.size(), s->textFmt, label, s->brush);
 
-        RECT er = PromptEditRect(*s);
-        D2D1_ROUNDED_RECT editRR{ D2D1::RectF((float)er.left - 0.5f, (float)er.top - 0.5f,
-                                             (float)er.right + 0.5f, (float)er.bottom + 0.5f),
+        RECT er = PromptEditFrameRect(*s);
+        D2D1_ROUNDED_RECT editRR{ D2D1::RectF((float)er.left + 0.5f, (float)er.top + 0.5f,
+                                             (float)er.right - 0.5f, (float)er.bottom - 0.5f),
                                   S(7), S(7) };
+        s->brush->SetColor(Theme::Color(s->theme.colors.paper));
+        s->rt->FillRoundedRectangle(editRR, s->brush);
         s->brush->SetColor(Theme::Color(s->theme.colors.paperEdge));
         s->rt->DrawRoundedRectangle(editRR, s->brush, 1.0f);
 
@@ -1234,7 +1247,7 @@ void MainWindow::ApplyResolvedTheme(bool persist) {
         InvalidateRect(edit_, nullptr, TRUE);
 
     UpdateLayeredState();        // Slim 胶囊透明度使用新主题 slimAlpha
-    RefreshTrayIcon();           // 按主题重建托盘图标
+    RefreshTrayIcon();           // 保持托盘使用固定应用图标
     if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
     if (persist) ScheduleSave();
 }
@@ -1605,80 +1618,9 @@ void MainWindow::Resize(UINT w, UINT h) {
 HICON MainWindow::CreateTrayIconHandle() {
     int cx = GetSystemMetrics(SM_CXSMICON);
     int cy = GetSystemMetrics(SM_CYSMICON);
-    if (cx <= 0) cx = 16;
-    if (cy <= 0) cy = 16;
-
-    HDC screen = GetDC(nullptr);
-    if (!screen) return LoadOwnedAppIcon(cx, cy);
-    HDC memDC = CreateCompatibleDC(screen);
-    HBITMAP colorBmp = CreateCompatibleBitmap(screen, cx, cy);
-    ReleaseDC(nullptr, screen);
-    if (!memDC || !colorBmp) {
-        if (colorBmp) DeleteObject(colorBmp);
-        if (memDC) DeleteDC(memDC);
-        return LoadOwnedAppIcon(cx, cy);
-    }
-    HGDIOBJ oldBmp = SelectObject(memDC, colorBmp);
-
-    RECT rc{ 0, 0, cx, cy };
-    HBRUSH bg = CreateSolidBrush(Theme::GdiColor(theme_.tray.background));
-    ::FillRect(memDC, &rc, bg);
-    DeleteObject(bg);
-
-    HPEN edgePen = CreatePen(PS_SOLID, 1, Theme::GdiColor(theme_.tray.edge));
-    HGDIOBJ oldBrush = SelectObject(memDC, GetStockObject(NULL_BRUSH));
-    HGDIOBJ oldPen = SelectObject(memDC, edgePen);
-    int radius = cx / 4;
-    RoundRect(memDC, 0, 0, cx, cy, radius, radius);
-    SelectObject(memDC, oldPen);
-    SelectObject(memDC, oldBrush);
-    DeleteObject(edgePen);
-
-    HPEN markPen = CreatePen(PS_SOLID, 1, Theme::GdiColor(theme_.tray.mark));
-    HGDIOBJ oldMarkPen = SelectObject(memDC, markPen);
-    int mx = cx / 4;
-    int mw = cx - cx / 2;
-    for (int i = 0; i < 3; i++) {
-        int my = cy / 3 + i * (cy / 6);
-        if (my >= cy - 1) break;
-        MoveToEx(memDC, mx, my, nullptr);
-        LineTo(memDC, mx + mw, my);
-    }
-    SelectObject(memDC, oldMarkPen);
-    DeleteObject(markPen);
-
-    if (model_.TotalActiveCount() > 0) {
-        HBRUSH badgeBrush = CreateSolidBrush(Theme::GdiColor(theme_.tray.badge));
-        HGDIOBJ oldBadgeBrush = SelectObject(memDC, badgeBrush);
-        HGDIOBJ oldBadgePen = SelectObject(memDC, GetStockObject(NULL_PEN));
-        int d = cx * 5 / 12;
-        Ellipse(memDC, cx - d, 0, cx, d);
-        SelectObject(memDC, oldBadgePen);
-        SelectObject(memDC, oldBadgeBrush);
-        DeleteObject(badgeBrush);
-    }
-
-    SelectObject(memDC, oldBmp);
-    DeleteDC(memDC);
-
-    int maskStride = ((cx + 15) / 16) * 2;
-    std::vector<BYTE> maskBits((size_t)maskStride * cy, 0);
-    HBITMAP maskBmp = CreateBitmap(cx, cy, 1, 1, maskBits.data());
-    if (!maskBmp) {
-        DeleteObject(colorBmp);
-        return LoadOwnedAppIcon(cx, cy);
-    }
-
-    ICONINFO ii{};
-    ii.fIcon = TRUE;
-    ii.hbmColor = colorBmp;
-    ii.hbmMask = maskBmp;
-    HICON icon = CreateIconIndirect(&ii);
-    DeleteObject(colorBmp);
-    DeleteObject(maskBmp);
-
-    if (!icon) return LoadOwnedAppIcon(cx, cy);
-    return icon;
+    if (cx <= 0) cx = 32;
+    if (cy <= 0) cy = 32;
+    return LoadOwnedAppIcon(cx, cy);
 }
 
 bool MainWindow::AddTrayIcon() {

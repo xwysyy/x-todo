@@ -59,7 +59,7 @@ Open [Releases](https://github.com/xwysyy/X-TODO/releases), download `x-todo.exe
 
 ## Themes
 
-Eight built-in themes: Paper, Mint, Sky, Rose, Sand, Graphite, Ink, and High contrast. Right-click the tray icon or open the title-bar menu and pick one under "Theme". Choose "Follow system" to track the Windows light/dark mode automatically, and the high-contrast theme kicks in when Windows turns high contrast on. Switching a theme recolors the main window, the side capsule, menus, the confirm dialog, the inline editor, and the tray icon together.
+Eight built-in themes: Paper, Mint, Sky, Rose, Sand, Graphite, Ink, and High contrast. Right-click the tray icon or open the title-bar menu and pick one under "Theme". Choose "Follow system" to track the Windows light/dark mode automatically, and the high-contrast theme kicks in when Windows turns high contrast on. Switching a theme recolors the main window, the side capsule, menus, the confirm dialog, and the inline editor. The tray keeps the app icon fixed.
 
 ### Custom themes
 

@@ -289,6 +289,23 @@ void MainWindow::StrokeRect(const D2D1_RECT_F& r, uint32_t rgb, float w, float a
     rt_->DrawRectangle(r, brush_, w);
 }
 
+void MainWindow::FillRoundRect(const D2D1_ROUNDED_RECT& rr, uint32_t rgb, float a) {
+    brush_->SetColor(Theme::D2DColor(rgb, a));
+    rt_->FillRoundedRectangle(rr, brush_);
+}
+
+void MainWindow::StrokeRoundRect(const D2D1_ROUNDED_RECT& rr, uint32_t rgb, float w, float a) {
+    brush_->SetColor(Theme::D2DColor(rgb, a));
+    rt_->DrawRoundedRectangle(rr, brush_, w);
+}
+
+void MainWindow::DrawSurfaceFrame(const D2D1_RECT_F& r, float radius, uint32_t fill,
+                                  uint32_t edge, float stroke) {
+    D2D1_ROUNDED_RECT rr{ r, radius, radius };
+    FillRoundRect(rr, fill);
+    StrokeRoundRect(rr, edge, stroke);
+}
+
 void MainWindow::Text(const std::wstring& s, const D2D1_RECT_F& r, uint32_t rgb,
                       IDWriteTextFormat* fmt) {
     if (s.empty()) return;
@@ -444,17 +461,9 @@ void MainWindow::DrawListTabs() {
         if (!list) continue;
 
         const bool selected = tab.listIndex == current;
-        const D2D1_ROUNDED_RECT rr{ tab.rect, S(8), S(8) };
         if (selected) {
-            brush_->SetColor(Theme::D2DColor(theme_.colors.paperElevated));
-            rt_->FillRoundedRectangle(rr, brush_);
-            brush_->SetColor(Theme::D2DColor(theme_.colors.paperEdge));
-            rt_->DrawLine(D2D1::Point2F(tab.rect.left + S(8), tab.rect.top + S(0.5f)),
-                          D2D1::Point2F(tab.rect.right - S(8), tab.rect.top + S(0.5f)), brush_, S(1));
-            rt_->DrawLine(D2D1::Point2F(tab.rect.left + S(0.5f), tab.rect.top + S(8)),
-                          D2D1::Point2F(tab.rect.left + S(0.5f), tab.rect.bottom - S(6)), brush_, S(1));
-            rt_->DrawLine(D2D1::Point2F(tab.rect.right - S(0.5f), tab.rect.top + S(8)),
-                          D2D1::Point2F(tab.rect.right - S(0.5f), tab.rect.bottom - S(6)), brush_, S(1));
+            DrawSurfaceFrame(tab.rect, S(8), theme_.colors.paperElevated,
+                             theme_.colors.paperEdge, S(1));
         }
 
         D2D1_RECT_F textR = tab.rect;
@@ -487,11 +496,8 @@ void MainWindow::DrawListTabs() {
     }
 
     if (addListRect_.right > addListRect_.left) {
-        D2D1_ROUNDED_RECT addRR{ addListRect_, S(8), S(8) };
-        brush_->SetColor(Theme::D2DColor(theme_.colors.paperElevated));
-        rt_->FillRoundedRectangle(addRR, brush_);
-        brush_->SetColor(Theme::D2DColor(theme_.colors.paperEdge));
-        rt_->DrawRoundedRectangle(addRR, brush_, S(1));
+        DrawSurfaceFrame(addListRect_, S(8), theme_.colors.paperElevated,
+                         theme_.colors.paperEdge, S(1));
 
         const float cx = (addListRect_.left + addListRect_.right) / 2.0f;
         const float cy = (addListRect_.top + addListRect_.bottom) / 2.0f;

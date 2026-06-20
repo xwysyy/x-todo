@@ -81,6 +81,10 @@ private:
     void DrawAddRow(bool hovered); // 未完成项后的新增入口（内容层）
     void FillRect(const D2D1_RECT_F& r, uint32_t rgb, float a = 1.0f);
     void StrokeRect(const D2D1_RECT_F& r, uint32_t rgb, float w, float a = 1.0f);
+    void FillRoundRect(const D2D1_ROUNDED_RECT& rr, uint32_t rgb, float a = 1.0f);
+    void StrokeRoundRect(const D2D1_ROUNDED_RECT& rr, uint32_t rgb, float w, float a = 1.0f);
+    void DrawSurfaceFrame(const D2D1_RECT_F& r, float radius, uint32_t fill,
+                          uint32_t edge, float stroke = 1.0f);
     void Text(const std::wstring& s, const D2D1_RECT_F& r, uint32_t rgb,
               IDWriteTextFormat* fmt);
 
