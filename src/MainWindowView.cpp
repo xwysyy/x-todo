@@ -100,6 +100,16 @@ void MainWindow::ScrollItemIntoView(int itemIndex) {
     ClampScroll();
 }
 
+int MainWindow::PreviousVisibleActiveItem(int itemIndex) const {
+    int previous = -1;
+    for (const RowLayout& r : rows_) {
+        if (r.completed) break;
+        if (r.itemIndex == itemIndex) return previous;
+        previous = r.itemIndex;
+    }
+    return -1;
+}
+
 void MainWindow::RebuildLayout() {
     for (auto& r : rows_) // 释放上一轮缓存的删除线布局，避免泄漏
         if (r.strikeLayout) { r.strikeLayout->Release(); r.strikeLayout = nullptr; }
@@ -117,6 +127,7 @@ void MainWindow::RebuildLayout() {
     const float handleW = S(18);
     const float delW    = S(20);
     const float gap     = S(6);
+    const float treeW   = S(14);
 
     float docY = 0;
     const int active = model_.ActiveCount();
@@ -126,11 +137,15 @@ void MainWindow::RebuildLayout() {
         RowLayout r{};
         r.itemIndex = itemIndex;
         r.completed = completed;
-        const float textLeft = pad + checkSz + S(8);
+        const TodoItem& item = model_.Items()[itemIndex];
+        const float indent = S(18) * (float)ClampTodoLevel(item.level);
+        const float treeLeft = pad + indent;
+        const float checkLeft = treeLeft + treeW;
+        const float textLeft = checkLeft + checkSz + S(8);
         float textRight = W - pad - handleW - gap - delW - gap;
         if (textRight < textLeft + S(20)) textRight = textLeft + S(20);
         std::wstring measureText;
-        const std::wstring& savedText = model_.Items()[itemIndex].text;
+        const std::wstring& savedText = item.text;
         const std::wstring* text = &savedText;
         if (editing() && editIndex_ == itemIndex && edit_) {
             measureText = ReadWindowText(edit_);
@@ -139,15 +154,21 @@ void MainWindow::RebuildLayout() {
         const float rowH = MeasureRowHeight(*text, textRight - textLeft);
         r.row    = D2D1::RectF(pad, docY, W - pad, docY + rowH);
         const float controlTop = docY + S(7);
-        r.check  = D2D1::RectF(pad, docY + S(8), pad + checkSz, docY + S(8) + checkSz);
+        r.disclosure = D2D1::RectF(treeLeft, controlTop, treeLeft + treeW, controlTop + S(20));
+        r.check  = D2D1::RectF(checkLeft, docY + S(8), checkLeft + checkSz, docY + S(8) + checkSz);
         r.handle = D2D1::RectF(W - pad - handleW, controlTop, W - pad, controlTop + S(20));
         r.del    = D2D1::RectF(r.handle.left - gap - delW, controlTop, r.handle.left - gap, controlTop + delW);
         r.text   = D2D1::RectF(textLeft, docY, textRight, docY + rowH);
+        r.hasChildren = model_.HasChildren(itemIndex);
+        r.collapsed = item.collapsed;
         rows_.push_back(r);
         docY += rowH;
     };
 
-    for (int i = 0; i < active; i++) makeRow(i, false);
+    for (int i = 0; i < active; ) {
+        makeRow(i, false);
+        i = model_.Items()[(size_t)i].collapsed ? model_.SubtreeEnd(i) : i + 1;
+    }
 
     addRect_ = D2D1::RectF(pad, docY, W - pad, docY + baseRowH);
     docY += baseRowH;
@@ -156,8 +177,12 @@ void MainWindow::RebuildLayout() {
         sectionRect_ = D2D1::RectF(pad, docY, W - pad, docY + S(Theme::kSectionH));
         clearRect_   = D2D1::RectF(W - pad - S(44), docY, W - pad, docY + S(Theme::kSectionH));
         docY += S(Theme::kSectionH);
-        if (model_.CurrentList().completedExpanded)
-            for (int i = active; i < total; i++) makeRow(i, true);
+        if (model_.CurrentList().completedExpanded) {
+            for (int i = active; i < total; ) {
+                makeRow(i, true);
+                i = model_.Items()[(size_t)i].collapsed ? model_.SubtreeEnd(i) : i + 1;
+            }
+        }
     } else {
         sectionRect_ = D2D1::RectF(0, 0, 0, 0);
         clearRect_   = D2D1::RectF(0, 0, 0, 0);
@@ -267,6 +292,7 @@ MainWindow::Hit MainWindow::HitTest(float x, float y) {
         if (docY >= r.row.top && docY < r.row.bottom) {
             h.rowIndex = (int)i;
             h.itemIndex = r.itemIndex;
+            if (r.hasChildren && InRect(r.disclosure, dp)) { h.kind = HitKind::TreeToggle; return h; }
             if (InRect(r.check, dp))                  { h.kind = HitKind::Check;  return h; }
             if (InRect(r.del, dp))                    { h.kind = HitKind::Delete; return h; }
             if (!r.completed && InRect(r.handle, dp)) { h.kind = HitKind::Handle; return h; }
@@ -332,6 +358,17 @@ void MainWindow::DrawCheckbox(const D2D1_RECT_F& box, bool checked) {
 
 void MainWindow::DrawRow(const RowLayout& r, bool hovered) {
     if (hovered) FillRect(r.row, theme_.colors.rowHover); // 最终消费色，不再混 alpha
+
+    int level = ClampTodoLevel(model_.Items()[r.itemIndex].level);
+    if (level > 0) {
+        brush_->SetColor(Theme::D2DColor(theme_.colors.textWeak, 0.45f));
+        float x = r.check.left - S(9);
+        rt_->DrawLine(D2D1::Point2F(x, r.row.top + S(7)),
+                      D2D1::Point2F(x, r.row.bottom - S(7)), brush_, S(1));
+    }
+
+    if (r.hasChildren)
+        Text(r.collapsed ? L"▸" : L"▾", r.disclosure, theme_.colors.textWeak, smallFormat_);
 
     DrawCheckbox(r.check, r.completed);
 
@@ -514,8 +551,14 @@ void MainWindow::DrawAddRow(bool hovered) {
 
     const float size = S(Theme::kCheckSize);
     const float cy = (addRect_.top + addRect_.bottom) / 2.0f;
-    D2D1_RECT_F icon = D2D1::RectF(addRect_.left, cy - size / 2.0f,
-                                   addRect_.left + size, cy + size / 2.0f);
+    int level = 0;
+    for (const RowLayout& r : rows_) {
+        if (r.completed) break;
+        level = ClampTodoLevel(model_.Items()[r.itemIndex].level);
+    }
+    const float left = addRect_.left + S(18) * (float)level;
+    D2D1_RECT_F icon = D2D1::RectF(left, cy - size / 2.0f,
+                                   left + size, cy + size / 2.0f);
     const float cx = (float)RoundToInt((icon.left + icon.right) * 0.5f) + 0.5f;
     const float iy = (icon.top + icon.bottom) * 0.5f;
     const float half = S(6);
@@ -688,12 +731,12 @@ void MainWindow::OnLButtonUp(float x, float y) {
     if (capsulePressing_) { FinishCapsulePress(); return; } // 胶囊按压：松手收尾（展开或吸附）
     if (dragging_) {
         dragging_ = false;
-        int target = dragInsert_;
-        if (target > dragFrom_) target--; // 移除源项后插入点左移
-        if (target >= 0 && target != dragFrom_) {
-            model_.MoveActive(dragFrom_, target);
-            RebuildLayout();
-            ScheduleSave();
+        if (dragInsert_ >= 0) {
+            bool moved = model_.MoveActive(dragFrom_, dragInsert_);
+            if (moved) {
+                RebuildLayout();
+                ScheduleSave();
+            }
         }
         dragFrom_ = dragInsert_ = -1;
         InvalidateRect(hwnd_, nullptr, FALSE);
@@ -707,6 +750,13 @@ void MainWindow::OnLButtonUp(float x, float y) {
     }
 
     switch (h.kind) {
+    case HitKind::TreeToggle:
+        if (model_.ToggleCollapsed(h.itemIndex)) {
+            RebuildLayout();
+            ClampScroll();
+            ScheduleSave();
+        }
+        break;
     case HitKind::Check:
         model_.SetDone(h.itemIndex, !model_.Items()[h.itemIndex].done);
         RebuildLayout();
@@ -717,10 +767,21 @@ void MainWindow::OnLButtonUp(float x, float y) {
     case HitKind::Text:
         BeginEdit(h.itemIndex);
         break;
-    case HitKind::Delete:
-        if (Confirm(Str::DeleteItemMsg, MB_ICONQUESTION))
+    case HitKind::Delete: {
+        int subtreeSize = model_.SubtreeEnd(h.itemIndex) - h.itemIndex;
+        bool confirmed = false;
+        if (subtreeSize > 1) {
+            std::wstring msg = (lang_ == Lang::Zh)
+                ? (L"删除这一项及其 " + std::to_wstring(subtreeSize - 1) + L" 个子项？")
+                : (L"Delete this item and its " + std::to_wstring(subtreeSize - 1) + L" children?");
+            confirmed = ConfirmText(msg, true);
+        } else {
+            confirmed = Confirm(Str::DeleteItemMsg, MB_ICONQUESTION);
+        }
+        if (confirmed)
             DeleteItem(h.itemIndex);
         break;
+    }
     case HitKind::Section: ToggleCompletedExpanded(); break;
     case HitKind::Clear:   ClearCompletedConfirm();   break;
     case HitKind::ListTab: SwitchList(h.itemIndex);   break;
@@ -730,7 +791,12 @@ void MainWindow::OnLButtonUp(float x, float y) {
     case HitKind::Pin:     TogglePin();               break;
     case HitKind::Close:   HideToTray();              break;
     case HitKind::Add: {
-        int n = model_.AddActive(L"");
+        int level = 0;
+        for (const RowLayout& r : rows_) {
+            if (r.completed) break;
+            level = ClampTodoLevel(model_.Items()[r.itemIndex].level);
+        }
+        int n = model_.AddActive(L"", level);
         RebuildLayout();
         ScrollItemIntoView(n);
         RefreshTrayIcon();
@@ -754,6 +820,8 @@ void MainWindow::OnMouseMove(float x, float y, bool lButton) {
             if (r.completed) break;
             if (docY < (r.row.top + r.row.bottom) / 2) { insert = r.itemIndex; break; }
         }
+        int dragEnd = model_.SubtreeEnd(dragFrom_);
+        if (insert > dragFrom_ && insert < dragEnd) insert = dragEnd;
         dragInsert_ = insert;
         InvalidateRect(hwnd_, nullptr, FALSE);
         return;
@@ -863,7 +931,8 @@ void MainWindow::CommitEdit(bool addNext) {
     ScheduleSave();
 
     if (addNext && !text.empty()) {
-        int n = model_.AddActive(L"");
+        int nextLevel = (idx >= 0 && idx < model_.Count()) ? model_.Items()[idx].level : 0;
+        int n = model_.AddActive(L"", nextLevel);
         RebuildLayout();
         ScrollItemIntoView(n);
         RefreshTrayIcon();
@@ -933,9 +1002,23 @@ LRESULT CALLBACK MainWindow::EditProcStatic(HWND h, UINT m, WPARAM w, LPARAM l,
         InvalidateRect(self->hwnd_, nullptr, FALSE);
     };
     switch (m) {
+    case WM_GETDLGCODE:
+        return DefSubclassProc(h, m, w, l) | DLGC_WANTTAB;
     case WM_KEYDOWN:
         if (w == VK_RETURN) { self->CommitEdit(true);  return 0; }
         if (w == VK_ESCAPE) { self->CancelEdit();      return 0; }
+        if (w == VK_TAB) {
+            const bool outdent = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            bool changed = outdent
+                ? self->model_.OutdentItem(self->editIndex_)
+                : self->model_.IndentItemUnder(self->editIndex_,
+                                               self->PreviousVisibleActiveItem(self->editIndex_));
+            if (changed) {
+                refresh();
+                self->ScheduleSave();
+            }
+            return 0;
+        }
         if (w == VK_DELETE) {
             LRESULT r = DefSubclassProc(h, m, w, l);
             refresh();
@@ -943,7 +1026,7 @@ LRESULT CALLBACK MainWindow::EditProcStatic(HWND h, UINT m, WPARAM w, LPARAM l,
         }
         break;
     case WM_CHAR:
-        if (w == 0x0D || w == 0x1B) return 0; // 吞掉回车/Esc 的字符，避免提示音
+        if (w == 0x09 || w == 0x0D || w == 0x1B) return 0; // 吞掉 Tab/回车/Esc 的字符，避免提示音
         {
             LRESULT r = DefSubclassProc(h, m, w, l);
             refresh();

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cwchar>
 
 namespace {
@@ -113,6 +114,15 @@ bool StartsWith(const std::wstring& s, const wchar_t* p) {
     return s.size() >= n && wcsncmp(s.c_str(), p, n) == 0;
 }
 
+bool ParseIntToken(const std::wstring& token, int& value) {
+    if (token.empty()) return false;
+    wchar_t* end = nullptr;
+    long parsed = wcstol(token.c_str(), &end, 10);
+    if (end != token.c_str() + token.size()) return false;
+    value = static_cast<int>(parsed);
+    return true;
+}
+
 // 精确解析单条 "ui key=value" 的 body（已去掉前缀 "ui "）。
 struct UiKeyValue {
     std::wstring key;
@@ -176,6 +186,9 @@ LoadResult Store::Load(TodoModel& model, WindowGeometry& geom, UiState& ui) {
     }
 
     const bool v2 = StartsWith(text, L"XTODO v2");
+    const bool v3 = StartsWith(text, L"XTODO v3");
+    const bool v4 = StartsWith(text, L"XTODO v4");
+    const bool multiList = v2 || v3 || v4;
     std::vector<TodoItem> legacyItems;
     std::vector<TodoList> lists;
     TodoList* currentList = nullptr;
@@ -194,14 +207,52 @@ LoadResult Store::Load(TodoModel& model, WindowGeometry& geom, UiState& ui) {
 
     for (const auto& line : SplitLines(text)) {
         if (StartsWith(line, L"item ")) {
-            // 格式：item <0|1> <escaped text>
+            // v2 格式：item <0|1> <escaped text>
+            // v3 格式：item <0|1> <level> <escaped text>
+            // v4 格式：item <0|1> <level> <collapsed> <escaped text>
             wchar_t flag = line.size() > 5 ? line[5] : L'0';
-            std::wstring rest = line.size() >= 7 ? line.substr(7) : L"";
+            int level = 0;
+            bool collapsed = false;
+            std::wstring rest;
+            if (v3 || v4) {
+                size_t levelStart = 7;
+                size_t levelEnd = (line.size() > levelStart) ? line.find(L' ', levelStart) : std::wstring::npos;
+                if (levelEnd != std::wstring::npos) {
+                    int parsed = 0;
+                    bool levelParsed = false;
+                    if (ParseIntToken(line.substr(levelStart, levelEnd - levelStart), parsed)) {
+                        level = parsed;
+                        rest = line.substr(levelEnd + 1);
+                        levelParsed = true;
+                    } else {
+                        rest = line.substr(levelStart);
+                    }
+                    if (v4 && levelParsed) {
+                        size_t collapsedStart = levelEnd + 1;
+                        size_t collapsedEnd = (line.size() > collapsedStart) ? line.find(L' ', collapsedStart) : std::wstring::npos;
+                        if (collapsedEnd != std::wstring::npos) {
+                            std::wstring token = line.substr(collapsedStart, collapsedEnd - collapsedStart);
+                            if (token == L"0" || token == L"1") {
+                                collapsed = token == L"1";
+                                rest = line.substr(collapsedEnd + 1);
+                            }
+                        }
+                    } else if (!v4) {
+                        rest = line.substr(levelEnd + 1);
+                    }
+                } else if (line.size() > levelStart) {
+                    rest = line.substr(levelStart);
+                }
+            } else {
+                rest = line.size() >= 7 ? line.substr(7) : L"";
+            }
             TodoItem it;
             it.done = (flag == L'1');
+            it.level = ClampTodoLevel(level);
+            it.collapsed = collapsed;
             it.text = Unescape(rest);
-            if (v2) ensureCurrentList().items.push_back(std::move(it));
-            else    legacyItems.push_back(std::move(it));
+            if (multiList) ensureCurrentList().items.push_back(std::move(it));
+            else           legacyItems.push_back(std::move(it));
         } else if (StartsWith(line, L"list ")) {
             std::wstring body = line.substr(5);
             size_t first = body.find(L' ');
@@ -265,8 +316,8 @@ LoadResult Store::Load(TodoModel& model, WindowGeometry& geom, UiState& ui) {
             // 未知 ui key：忽略，保留默认值，不触发 corrupt 备份路径
         }
     }
-    if (v2) model.ReplaceLists(std::move(lists), selectedListId);
-    else    model.ReplaceAll(std::move(legacyItems), ui.completedExpanded);
+    if (multiList) model.ReplaceLists(std::move(lists), selectedListId);
+    else           model.ReplaceAll(std::move(legacyItems), ui.completedExpanded);
     return LoadResult::Loaded;
 }
 
@@ -274,7 +325,7 @@ bool Store::Save(const TodoModel& model, const WindowGeometry& geom, const UiSta
     std::wstring path = DataFilePath();
     if (path.empty()) return false;
 
-    std::wstring text = L"XTODO v2\n";
+    std::wstring text = L"XTODO v4\n";
     if (geom.valid) {
         wchar_t buf[128];
         swprintf_s(buf, L"win %d %d %d %d\n", geom.x, geom.y, geom.w, geom.h);
@@ -317,6 +368,9 @@ bool Store::Save(const TodoModel& model, const WindowGeometry& geom, const UiSta
         for (const auto& it : list.items) {
             text += L"item ";
             text += it.done ? L"1 " : L"0 ";
+            wchar_t levelBuf[16];
+            swprintf_s(levelBuf, L"%d %d ", ClampTodoLevel(it.level), it.collapsed ? 1 : 0);
+            text += levelBuf;
             text += Escape(it.text);
             text += L"\n";
         }

@@ -50,17 +50,20 @@ private:
         int itemIndex;
         bool completed;
         D2D1_RECT_F row;    // 文档坐标（y 从内容区顶部 0 起算）
+        D2D1_RECT_F disclosure;
         D2D1_RECT_F check;
         D2D1_RECT_F text;
         D2D1_RECT_F del;
         D2D1_RECT_F handle;
+        bool hasChildren = false;
+        bool collapsed = false;
         mutable IDWriteTextLayout* strikeLayout = nullptr; // 完成项删除线布局，首帧创建后缓存
     };
     struct ListTabLayout {
         int listIndex = -1;
         D2D1_RECT_F rect{};
     };
-    enum class HitKind { None, Check, Text, Delete, Handle, Section, Clear, Add, ListTab, AddList, Pin, Close, Menu, Theme };
+    enum class HitKind { None, TreeToggle, Check, Text, Delete, Handle, Section, Clear, Add, ListTab, AddList, Pin, Close, Menu, Theme };
     struct Hit { HitKind kind = HitKind::None; int rowIndex = -1; int itemIndex = -1; };
 
     void  RebuildLayout();
@@ -101,6 +104,7 @@ private:
     void CommitEdit(bool addNext);
     void CancelEdit();
     void LayoutEditBox();
+    int  PreviousVisibleActiveItem(int itemIndex) const;
     bool editing() const { return editIndex_ >= 0; }
     static LRESULT CALLBACK EditProcStatic(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
 

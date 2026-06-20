@@ -32,7 +32,8 @@ X-TODO is an always-on desktop to-do note. A frameless slip stays on your deskto
 ## Features
 
 - **One line per task.** Tick the box to check it off, press Enter to add the next one.
-- **Drag to reorder.** Finished items fold into a collapsible "Completed" section, and every delete asks first.
+- **Nested tasks.** Press Tab while editing to indent, Shift+Tab to outdent, and fold child items under their parent.
+- **Drag to reorder.** Move an item with its children. Finished blocks fold into a collapsible "Completed" section, and every delete asks first.
 - **Three layouts:** a normal window, sunk into the desktop, or folded into a side capsule that slides out on hover.
 - **Saves itself.** Reopens exactly as you left it; the data is a single text file.
 - **Stays in the tray.** Closing hides it, a double-click brings it back, startup launch is optional.
@@ -50,10 +51,12 @@ Open [Releases](https://github.com/xwysyy/X-TODO/releases), download `x-todo.exe
 | Action | How |
 | :-- | :-- |
 | Add | Click "＋ New item" at the bottom, type, press Enter to keep going |
-| Done / undo | Click the box in front of an item; click again to bring it back |
+| Done / undo | Click the box in front of an item; child items move with it as one block |
 | Edit | Click the item text and type |
-| Delete | Hover an item, click ×, confirm |
-| Reorder | Drag the handle on the right of an item |
+| Indent / outdent | Edit an active item, then press Tab or Shift+Tab |
+| Collapse children | Click the disclosure arrow on a parent item |
+| Delete | Hover an item, click ×, confirm; child items are deleted with it |
+| Reorder | Drag the handle on the right of an item; child items move with it |
 | Move / resize | Drag the title bar to move, drag the edges to resize |
 | Switch layout | Right-click the tray icon: normal window / desktop / side capsule |
 

@@ -5,6 +5,46 @@
 namespace {
 constexpr const char* kDefaultListId = "inbox";
 constexpr const wchar_t* kDefaultListTitle = L"默认";
+
+int SubtreeEndInList(const TodoList& list, int index, int limit) {
+    const int count = static_cast<int>(list.items.size());
+    if (index < 0 || index >= count) return index;
+    if (limit < index + 1) limit = index + 1;
+    if (limit > count) limit = count;
+
+    const int baseLevel = list.items[(size_t)index].level;
+    int end = index + 1;
+    while (end < limit && list.items[(size_t)end].level > baseLevel)
+        ++end;
+    return end;
+}
+
+void NormalizeLevels(std::vector<TodoItem>& items, int first, int last) {
+    if (first < 0) first = 0;
+    if (last > static_cast<int>(items.size())) last = static_cast<int>(items.size());
+    for (int i = first; i < last; ++i) {
+        int maxHere = (i == first) ? 0 : items[(size_t)i - 1].level + 1;
+        int level = ClampTodoLevel(items[(size_t)i].level);
+        if (level > maxHere) level = maxHere;
+        items[(size_t)i].level = ClampTodoLevel(level);
+    }
+}
+
+void NormalizeCollapsed(TodoList& list) {
+    const int count = static_cast<int>(list.items.size());
+    for (int i = 0; i < count; ++i) {
+        int limit = list.items[(size_t)i].done ? count : list.activeCount;
+        if (SubtreeEndInList(list, i, limit) <= i + 1)
+            list.items[(size_t)i].collapsed = false;
+    }
+}
+
+void RebaseBlockToRoot(std::vector<TodoItem>& block) {
+    if (block.empty()) return;
+    int baseLevel = block.front().level;
+    for (TodoItem& item : block)
+        item.level = ClampTodoLevel(item.level - baseLevel);
+}
 }
 
 TodoModel::TodoModel() {
@@ -40,10 +80,12 @@ int TodoModel::TotalActiveCount() const {
     return total;
 }
 
-int TodoModel::AddActive(const std::wstring& text) {
+int TodoModel::AddActive(const std::wstring& text, int level) {
     TodoList& list = CurrentListMutable();
     int at = list.activeCount;
-    list.items.insert(list.items.begin() + at, TodoItem{ text, false });
+    if (level < 0)
+        level = (at > 0) ? list.items[(size_t)at - 1].level : 0;
+    list.items.insert(list.items.begin() + at, TodoItem{ text, false, ClampTodoLevel(level), false });
     ++list.activeCount;
     return at;
 }
@@ -57,25 +99,48 @@ void TodoModel::SetText(int index, const std::wstring& text) {
 void TodoModel::Remove(int index) {
     TodoList& list = CurrentListMutable();
     if (index < 0 || index >= static_cast<int>(list.items.size())) return;
-    if (!list.items[(size_t)index].done) --list.activeCount;
-    list.items.erase(list.items.begin() + index);
+    int limit = list.items[(size_t)index].done ? static_cast<int>(list.items.size()) : list.activeCount;
+    int end = SubtreeEndInList(list, index, limit);
+    int activeRemoved = 0;
+    for (int i = index; i < end; ++i)
+        if (!list.items[(size_t)i].done) ++activeRemoved;
+    list.items.erase(list.items.begin() + index, list.items.begin() + end);
+    list.activeCount -= activeRemoved;
+    if (list.activeCount < 0) list.activeCount = 0;
+    NormalizeCollapsed(list);
 }
 
 void TodoModel::SetDone(int index, bool done) {
     TodoList& list = CurrentListMutable();
     if (index < 0 || index >= static_cast<int>(list.items.size())) return;
-    if (list.items[(size_t)index].done == done) return;
-
-    TodoItem item = list.items[(size_t)index];
-    item.done = done;
-    list.items.erase(list.items.begin() + index);
-    if (done) {
-        --list.activeCount;
-        list.items.insert(list.items.begin() + list.activeCount, item);
-    } else {
-        list.items.insert(list.items.begin() + list.activeCount, item);
-        ++list.activeCount;
+    int limit = list.items[(size_t)index].done ? static_cast<int>(list.items.size()) : list.activeCount;
+    int end = SubtreeEndInList(list, index, limit);
+    bool changed = false;
+    int activeBefore = 0;
+    for (int i = index; i < end; ++i) {
+        if (list.items[(size_t)i].done != done) changed = true;
+        if (!list.items[(size_t)i].done) ++activeBefore;
     }
+    if (!changed) return;
+
+    std::vector<TodoItem> block(list.items.begin() + index, list.items.begin() + end);
+    for (TodoItem& item : block)
+        item.done = done;
+    RebaseBlockToRoot(block);
+    list.items.erase(list.items.begin() + index, list.items.begin() + end);
+    list.activeCount -= activeBefore;
+    if (list.activeCount < 0) list.activeCount = 0;
+
+    int insertAt = list.activeCount;
+    if (done) {
+        list.items.insert(list.items.begin() + insertAt, block.begin(), block.end());
+    } else {
+        list.items.insert(list.items.begin() + insertAt, block.begin(), block.end());
+        list.activeCount += static_cast<int>(block.size());
+    }
+    NormalizeLevels(list.items, 0, list.activeCount);
+    NormalizeLevels(list.items, list.activeCount, static_cast<int>(list.items.size()));
+    NormalizeCollapsed(list);
 }
 
 void TodoModel::ClearCompleted() {
@@ -83,17 +148,80 @@ void TodoModel::ClearCompleted() {
     list.items.erase(list.items.begin() + list.activeCount, list.items.end());
 }
 
-void TodoModel::MoveActive(int from, int insertAt) {
+bool TodoModel::MoveActive(int from, int insertAt) {
     TodoList& list = CurrentListMutable();
-    if (from < 0 || from >= list.activeCount) return;
+    if (from < 0 || from >= list.activeCount) return false;
+    int end = SubtreeEndInList(list, from, list.activeCount);
+    int blockSize = end - from;
+    if (blockSize <= 0) return false;
 
-    TodoItem item = list.items[(size_t)from];
-    list.items.erase(list.items.begin() + from);
-
-    int maxAt = list.activeCount - 1;
     if (insertAt < 0) insertAt = 0;
-    if (insertAt > maxAt) insertAt = maxAt;
-    list.items.insert(list.items.begin() + insertAt, item);
+    if (insertAt > list.activeCount) insertAt = list.activeCount;
+    if (insertAt >= from && insertAt <= end) return false;
+
+    std::vector<TodoItem> block(list.items.begin() + from, list.items.begin() + end);
+    list.items.erase(list.items.begin() + from, list.items.begin() + end);
+    if (insertAt > end) insertAt -= blockSize;
+    list.items.insert(list.items.begin() + insertAt, block.begin(), block.end());
+    NormalizeLevels(list.items, 0, list.activeCount);
+    NormalizeCollapsed(list);
+    return true;
+}
+
+bool TodoModel::IndentItemUnder(int index, int parentIndex) {
+    TodoList& list = CurrentListMutable();
+    if (index <= 0 || index >= list.activeCount) return false;
+    if (parentIndex < 0 || parentIndex >= index || parentIndex >= list.activeCount) return false;
+
+    int current = list.items[(size_t)index].level;
+    int target = current + 1;
+    int maxByParent = list.items[(size_t)parentIndex].level + 1;
+    if (target > maxByParent) target = maxByParent;
+    target = ClampTodoLevel(target);
+    if (target <= current) return false;
+
+    int end = SubtreeEndInList(list, index, list.activeCount);
+    int delta = target - current;
+    list.items[(size_t)parentIndex].collapsed = false;
+    for (int i = index; i < end; ++i)
+        list.items[(size_t)i].level = ClampTodoLevel(list.items[(size_t)i].level + delta);
+    NormalizeCollapsed(list);
+    return true;
+}
+
+bool TodoModel::OutdentItem(int index) {
+    TodoList& list = CurrentListMutable();
+    if (index < 0 || index >= list.activeCount) return false;
+    if (list.items[(size_t)index].level <= 0) return false;
+
+    int end = SubtreeEndInList(list, index, list.activeCount);
+    for (int i = index; i < end; ++i)
+        list.items[(size_t)i].level = ClampTodoLevel(list.items[(size_t)i].level - 1);
+    NormalizeCollapsed(list);
+    return true;
+}
+
+bool TodoModel::HasChildren(int index) const {
+    return SubtreeEnd(index) > index + 1;
+}
+
+bool TodoModel::ToggleCollapsed(int index) {
+    TodoList& list = CurrentListMutable();
+    if (index < 0 || index >= static_cast<int>(list.items.size())) return false;
+    int limit = list.items[(size_t)index].done ? static_cast<int>(list.items.size()) : list.activeCount;
+    if (SubtreeEndInList(list, index, limit) <= index + 1) {
+        list.items[(size_t)index].collapsed = false;
+        return false;
+    }
+    list.items[(size_t)index].collapsed = !list.items[(size_t)index].collapsed;
+    return true;
+}
+
+int TodoModel::SubtreeEnd(int index) const {
+    const TodoList& list = CurrentList();
+    if (index < 0 || index >= static_cast<int>(list.items.size())) return index;
+    int limit = list.items[(size_t)index].done ? static_cast<int>(list.items.size()) : list.activeCount;
+    return SubtreeEndInList(list, index, limit);
 }
 
 int TodoModel::AddList(const std::wstring& title) {
@@ -179,9 +307,14 @@ void TodoModel::EnsureList() {
 }
 
 void TodoModel::Normalize(TodoList& list) {
+    for (TodoItem& item : list.items)
+        item.level = ClampTodoLevel(item.level);
     auto mid = std::stable_partition(list.items.begin(), list.items.end(),
         [](const TodoItem& it) { return !it.done; });
     list.activeCount = static_cast<int>(mid - list.items.begin());
+    NormalizeLevels(list.items, 0, list.activeCount);
+    NormalizeLevels(list.items, list.activeCount, static_cast<int>(list.items.size()));
+    NormalizeCollapsed(list);
 }
 
 std::string TodoModel::MakeListId() {
