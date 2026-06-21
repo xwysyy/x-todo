@@ -193,18 +193,22 @@ void ChromeHitTestCoversTitleButtonsTabsAndAddList() {
         1.0f, title, strip.addList, strip.tabs);
     EXPECT_EQ(hit.kind, GuiLayout::ChromeHit::AddList);
 
+    // List tabs come first (from the left); the fixed calendar tab is appended last.
     hit = GuiLayout::HitTestChrome(
         Mid(strip.tabs[0].rect.left, strip.tabs[0].rect.right),
         Mid(strip.tabs[0].rect.top, strip.tabs[0].rect.bottom),
         1.0f, title, strip.addList, strip.tabs);
-    EXPECT_EQ(hit.kind, GuiLayout::ChromeHit::CalendarTab);
+    EXPECT_EQ(hit.kind, GuiLayout::ChromeHit::ListTab);
+    EXPECT_EQ(hit.listIndex, 0);
 
     hit = GuiLayout::HitTestChrome(
         Mid(strip.tabs[2].rect.left, strip.tabs[2].rect.right),
         Mid(strip.tabs[2].rect.top, strip.tabs[2].rect.bottom),
         1.0f, title, strip.addList, strip.tabs);
-    EXPECT_EQ(hit.kind, GuiLayout::ChromeHit::ListTab);
-    EXPECT_EQ(hit.listIndex, 1);
+    EXPECT_EQ(hit.kind, GuiLayout::ChromeHit::CalendarTab);
+
+    // The calendar tab sits to the right of every list tab.
+    EXPECT_TRUE(strip.tabs[2].rect.left >= strip.tabs[1].rect.right);
 }
 
 void TabStripNeverOverlapsAddList() {
@@ -408,6 +412,30 @@ void CalendarHitTestingUsesBlockRectsAndResizeHandles() {
     EXPECT_EQ(hit.kind, GuiCalendar::HitKind::EmptyTimeline);
 }
 
+void CalendarHeaderButtonsAndStatusBarLayout() {
+    const GuiCalendar::Frame frame = GuiCalendar::ComputeFrame(320.0f, 500.0f, 1.0f);
+    const std::vector<GuiCalendar::BlockRect> none;
+
+    EXPECT_EQ(GuiCalendar::HitTest(Mid(frame.prevDay.left, frame.prevDay.right),
+                                   Mid(frame.prevDay.top, frame.prevDay.bottom),
+                                   0.0f, 1.0f, frame, none).kind,
+              GuiCalendar::HitKind::PrevDay);
+    EXPECT_EQ(GuiCalendar::HitTest(Mid(frame.nextDay.left, frame.nextDay.right),
+                                   Mid(frame.nextDay.top, frame.nextDay.bottom),
+                                   0.0f, 1.0f, frame, none).kind,
+              GuiCalendar::HitKind::NextDay);
+    EXPECT_EQ(GuiCalendar::HitTest(Mid(frame.today.left, frame.today.right),
+                                   Mid(frame.today.top, frame.today.bottom),
+                                   0.0f, 1.0f, frame, none).kind,
+              GuiCalendar::HitKind::Today);
+
+    // Today button sits between prev and next without overlap.
+    EXPECT_TRUE(frame.today.left > frame.prevDay.right);
+    EXPECT_TRUE(frame.today.right <= frame.nextDay.left);
+    // Status bar lives below the timeline, not overlapping it.
+    EXPECT_TRUE(frame.statusBar.top >= frame.timelineViewport.bottom);
+}
+
 const TestCase kTests[] = {
     {"NonClientHitTestPrioritizesTitleButtonsOverResizeBand", NonClientHitTestPrioritizesTitleButtonsOverResizeBand},
     {"NonClientHitTestMapsEdgesCornersCaptionAndCapsule", NonClientHitTestMapsEdgesCornersCaptionAndCapsule},
@@ -426,6 +454,7 @@ const TestCase kTests[] = {
     {"ThemeMenuBuildsStableCommandRangesAndCustomCap", ThemeMenuBuildsStableCommandRangesAndCustomCap},
     {"CalendarLayoutSnapsDragCreationAndParsesMinutePrecision", CalendarLayoutSnapsDragCreationAndParsesMinutePrecision},
     {"CalendarHitTestingUsesBlockRectsAndResizeHandles", CalendarHitTestingUsesBlockRectsAndResizeHandles},
+    {"CalendarHeaderButtonsAndStatusBarLayout", CalendarHeaderButtonsAndStatusBarLayout},
 };
 
 } // namespace

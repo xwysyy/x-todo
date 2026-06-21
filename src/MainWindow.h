@@ -81,6 +81,7 @@ private:
         AddList,
         CalendarPrevDay,
         CalendarNextDay,
+        CalendarToday,
         CalendarEmptyTimeline,
         CalendarBlock,
         CalendarResizeStart,
@@ -141,6 +142,7 @@ private:
     void EnsureCalendarDay();
     void SetActiveView(MainView view);
     void SwitchCalendarDay(int deltaDays);
+    void GoToCalendarToday();
     bool calendarActive() const { return activeView_ == MainView::Calendar; }
     bool calendarEditing() const { return calendarEditId_ >= 0; }
     void ClampCalendarScroll();

@@ -11,10 +11,12 @@ struct Frame {
     Gui::Rect dateHeader;
     Gui::Rect prevDay;
     Gui::Rect nextDay;
+    Gui::Rect today;
     Gui::Rect allDay;
     Gui::Rect timelineViewport;
     Gui::Rect gutter;
     Gui::Rect lane;
+    Gui::Rect statusBar;
     float hourHeight = 0.0f;
     float contentHeight = 0.0f;
 };
@@ -28,6 +30,7 @@ enum class HitKind {
     None,
     PrevDay,
     NextDay,
+    Today,
     EmptyTimeline,
     BlockBody,
     ResizeStart,
