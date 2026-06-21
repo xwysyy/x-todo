@@ -24,6 +24,7 @@ if(XTODO_BUILD_APP)
         src/MainWindowView.cpp
         src/TodoModel.cpp
         src/Store.cpp
+        src/StoreFormat.cpp
         src/Autostart.cpp
         src/I18n.cpp
         src/Theme.cpp

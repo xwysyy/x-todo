@@ -1,5 +1,7 @@
 #include "I18n.h"
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 const wchar_t* T(Str key, Lang lang) {
     const bool zh = (lang == Lang::Zh);
@@ -54,11 +56,17 @@ const wchar_t* T(Str key, Lang lang) {
         case Str::ThemeHighContrastNotice:
                                       return zh ? L"Windows 高对比已开启，当前主题可能不易辨认"
                                                 : L"Windows High Contrast is on; the current theme may be hard to read";
+        case Str::Count:
+            break;
     }
     return L"";
 }
 
 Lang SystemDefaultLang() {
+#ifdef _WIN32
     LANGID id = GetUserDefaultUILanguage();
     return PRIMARYLANGID(id) == LANG_CHINESE ? Lang::Zh : Lang::En;
+#else
+    return Lang::En;
+#endif
 }

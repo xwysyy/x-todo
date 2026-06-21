@@ -48,7 +48,9 @@ enum class Str {
     ThemeSetLightFollow,     // 设为浅色跟随主题
     ThemeSetDarkFollow,      // 设为深色跟随主题
     ThemeFallbackNotice,     // 主题回退提示
-    ThemeHighContrastNotice  // 高对比开启提示
+    ThemeHighContrastNotice, // 高对比开启提示
+
+    Count
 };
 
 const wchar_t* T(Str key, Lang lang);

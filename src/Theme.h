@@ -1,7 +1,25 @@
 #pragma once
+#include <cstdint>
+#ifdef _WIN32
 #include <windows.h>
 #include <d2d1.h>
-#include <cstdint>
+#else
+using COLORREF = uint32_t;
+constexpr COLORREF RGB(unsigned char r, unsigned char g, unsigned char b) {
+    return static_cast<COLORREF>(r) | (static_cast<COLORREF>(g) << 8) | (static_cast<COLORREF>(b) << 16);
+}
+struct D2D1_COLOR_F {
+    float r;
+    float g;
+    float b;
+    float a;
+};
+namespace D2D1 {
+inline D2D1_COLOR_F ColorF(float r, float g, float b, float a = 1.0f) {
+    return D2D1_COLOR_F{ r, g, b, a };
+}
+}
+#endif
 #include <string>
 #include <vector>
 

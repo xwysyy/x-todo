@@ -18,8 +18,8 @@ COLORREF GdiColor(uint32_t rgb) {
 }
 
 uint32_t Blend(uint32_t fg, uint32_t bg, float a) {
-    if (a < 0.0f) a = 0.0f;
-    if (a > 1.0f) a = 1.0f;
+    if (a <= 0.0f) return bg & 0xFFFFFFu;
+    if (a >= 1.0f) return fg & 0xFFFFFFu;
     int fr = (fg >> 16) & 0xFF, fgc = (fg >> 8) & 0xFF, fb = fg & 0xFF;
     int br = (bg >> 16) & 0xFF, bgc = (bg >> 8) & 0xFF, bb = bg & 0xFF;
     int r = br + (int)((fr - br) * a + 0.5f);
@@ -91,6 +91,7 @@ ResolveResult ResolveTheme(const ResolveInput& in) {
     return out;
 }
 
+#ifdef _WIN32
 bool SystemUsesDarkMode(bool* ok) {
     if (ok) *ok = false;
     HKEY key = nullptr;
@@ -116,5 +117,16 @@ bool SystemHighContrastOn(bool* ok) {
     if (ok) *ok = true;
     return (hc.dwFlags & HCF_HIGHCONTRASTON) != 0;
 }
+#else
+bool SystemUsesDarkMode(bool* ok) {
+    if (ok) *ok = false;
+    return false;
+}
+
+bool SystemHighContrastOn(bool* ok) {
+    if (ok) *ok = false;
+    return false;
+}
+#endif
 
 } // namespace Theme

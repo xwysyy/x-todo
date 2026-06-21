@@ -1,25 +1,36 @@
 # Testing
 
-X-TODO has one automated test target today:
+X-TODO now has multiple focused unit-test targets instead of one large test file.
+The app itself is Win32 + Direct2D, but the tested core layers are kept free of
+Win32 dependencies so they run in CI on both Linux and Windows.
 
-```text
-xtodo_model_tests
-```
+## Test targets
 
-It covers the pure `TodoModel` layer: active and completed partitioning,
-multi-level item trees, subtree completion and restore, drag reordering,
-multi-list isolation, list rename, list delete, legacy import normalization,
-and invalid-index no-op behavior.
+| Target | Coverage |
+| --- | --- |
+| `xtodo_model_core_tests` | default model, active/completed partitioning, text edits, invalid-index no-ops, legacy single-list normalization |
+| `xtodo_model_tree_tests` | multi-level trees, subtree completion/restore, subtree deletion, drag reordering, indent/outdent, collapse cleanup |
+| `xtodo_model_list_tests` | multi-list isolation, list id generation, current-list selection, rename/delete, per-list completed expansion |
+| `xtodo_model_regression_tests` | regressions from recent git history: insert-after-subtree, completed-block ordering, list deletion selection, id collisions, deterministic invariant fuzzing |
+| `xtodo_store_format_tests` | `data.txt` v1-v4 parsing, latest v4 serialization, escaping, UI-state validation, theme-id key parsing, mount-mode migration |
+| `xtodo_theme_tests` | color helpers, built-in theme catalog stability, contrast thresholds, theme resolution and fallback behavior |
+| `xtodo_i18n_tests` | all declared UI strings in zh/en, important behavioral strings, default language result validity |
 
 ## Run with CMake
-
-The desktop app is Win32 and Direct2D only. The model tests do not depend on
-Win32 APIs, so they can run on Windows and Linux.
 
 ```bash
 cmake -S . -B build-tests -DXTODO_BUILD_APP=OFF -DXTODO_BUILD_TESTS=ON
 cmake --build build-tests --config Release --parallel
 ctest --test-dir build-tests --output-on-failure -C Release
+```
+
+On single-config generators such as Makefiles or Ninja, the `--config` / `-C`
+arguments are harmless but optional:
+
+```bash
+cmake -S . -B build-tests -DXTODO_BUILD_APP=OFF -DXTODO_BUILD_TESTS=ON
+cmake --build build-tests --parallel
+ctest --test-dir build-tests --output-on-failure
 ```
 
 `XTODO_BUILD_TESTS` defaults to `OFF`, so a normal app build keeps the existing
@@ -33,23 +44,16 @@ cmake --build build --config MinSizeRel
 On non-Windows systems, `XTODO_BUILD_APP` is forced off because the app target
 links Win32, Direct2D, and DirectWrite libraries.
 
-## Minimal Local Fallback
+## Regression policy
 
-If CMake is not available, the model tests can still be compiled directly with
-a C++17 compiler:
+When a bug is fixed, add a test to the smallest matching target. Use
+`xtodo_model_regression_tests` for behavior that maps directly to a historical
+regression or a git commit, and keep the other model tests focused on stable
+feature contracts. The deterministic fuzz test should stay seeded so failures
+are reproducible.
 
-```bash
-g++ -std=c++17 -Wall -Wextra -Wpedantic -Isrc \
-  tests/todo_model_tests.cpp src/TodoModel.cpp \
-  -o /tmp/xtodo_model_tests
-/tmp/xtodo_model_tests
-```
+## CI coverage
 
-This fallback verifies the same executable test source. It does not verify
-CMake wiring.
-
-## CI Coverage
-
-The `build` workflow runs `xtodo_model_tests` on `ubuntu-latest` and
-`windows-latest`. The release path waits for both the model tests and the
+The `build` workflow runs the full CMake test suite on `ubuntu-latest` and
+`windows-latest`. The release path waits for the full unit-test suite and the
 Windows app build before creating tags or publishing release artifacts.
