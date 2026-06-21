@@ -29,8 +29,9 @@ descendants under a collapsed item must not affect the parent chosen by `Tab`.
 
 Pressing `Enter` while editing an active item inserts a new empty active item
 after the edited item's whole subtree. The new item starts at the edited item's
-level. Pressing `Tab` on that new item nests it one level deeper. The bottom add
-row still appends to the active section.
+level. Pressing `Tab` on that new item nests it one level deeper. When a list
+has no active items, the empty active area is clickable and creates the first
+empty active item.
 
 Checking an item applies to that item and its subtree. Deleting an item removes
 that item and its subtree. Dragging an item moves the whole subtree as one

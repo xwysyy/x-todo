@@ -3,6 +3,7 @@
 #include "Theme.h"
 #include "TodoModel.h"
 
+#include <algorithm>
 #include <cwchar>
 
 namespace GuiLayout {
@@ -96,6 +97,16 @@ RowControls ComputeRowControls(float windowWidth, float docY, float rowHeight, i
     out.del = Gui::Rect{ out.handle.left - gap - delW, controlTop, out.handle.left - gap, controlTop + delW };
     out.text = Gui::Rect{ textLeft, docY, textRight, docY + rowHeight };
     return out;
+}
+
+Gui::Rect ComputeEmptyActivePrompt(float windowWidth, float docY, float viewportHeight,
+                                   bool listEmpty, float dpiScale) {
+    const float pad = S(Theme::kPadX, dpiScale);
+    const float top = listEmpty ? docY + S(12.0f, dpiScale) : docY;
+    const float height = listEmpty
+        ? std::max(S(112.0f, dpiScale), viewportHeight - S(36.0f, dpiScale))
+        : S(Theme::kRowH, dpiScale);
+    return Gui::Rect{ pad, top, windowWidth - pad, top + height };
 }
 
 RowHit HitTestRowControls(const RowControls& row, float x, float docY, bool hasChildren, bool completed) {

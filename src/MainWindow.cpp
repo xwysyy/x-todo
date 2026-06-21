@@ -1799,10 +1799,7 @@ void MainWindow::CreateList() {
     hoverRow_ = -1;
     dragging_ = false;
     dragFrom_ = dragInsert_ = -1;
-    RebuildLayout();
-    ClampScroll();
-    ScheduleSave();
-    InvalidateRect(hwnd_, nullptr, FALSE);
+    CreateEmptyActiveItem();
 }
 
 void MainWindow::RenameList(int index) {
@@ -2179,6 +2176,19 @@ void MainWindow::ToggleCompletedExpanded() {
 
 void MainWindow::ToggleAutostart() {
     Autostart::SetEnabled(!Autostart::IsEnabled());
+}
+
+void MainWindow::CreateEmptyActiveItem() {
+    if (editing()) CommitEdit(false);
+    if (model_.ActiveCount() != 0) return;
+
+    int n = model_.AddActive(L"", 0);
+    RebuildLayout();
+    ScrollItemIntoView(n);
+    RefreshTrayIcon();
+    ScheduleSave();
+    BeginEdit(n);
+    InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 bool MainWindow::Confirm(Str message, UINT icon) {

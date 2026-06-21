@@ -214,6 +214,20 @@ void TabStripNeverOverlapsAddList() {
     EXPECT_TRUE(strip.tabs.size() < metrics.size());
 }
 
+void EmptyActivePromptUsesLargeClickTargetOnlyForTrulyEmptyList() {
+    const Gui::Rect empty = GuiLayout::ComputeEmptyActivePrompt(260.0f, 0.0f, 260.0f, true, 1.0f);
+    EXPECT_EQ(empty.left, 14.0f);
+    EXPECT_EQ(empty.top, 12.0f);
+    EXPECT_EQ(empty.right, 246.0f);
+    EXPECT_EQ(empty.bottom, 236.0f);
+
+    const Gui::Rect completedOnly = GuiLayout::ComputeEmptyActivePrompt(260.0f, 17.0f, 260.0f, false, 1.0f);
+    EXPECT_EQ(completedOnly.left, 14.0f);
+    EXPECT_EQ(completedOnly.top, 17.0f);
+    EXPECT_EQ(completedOnly.right, 246.0f);
+    EXPECT_EQ(completedOnly.bottom, 51.0f);
+}
+
 void RowLayoutKeepsIndentControlsAndHitTestingInLockstep() {
     const GuiLayout::RowControls root = GuiLayout::ComputeRowControls(260.0f, 0.0f, 34.0f, 0, 1.0f);
     const GuiLayout::RowControls child = GuiLayout::ComputeRowControls(260.0f, 0.0f, 34.0f, 2, 1.0f);
@@ -346,6 +360,7 @@ const TestCase kTests[] = {
     {"TitleButtonLayoutOrdersActionsAndStaysInsideWindow", TitleButtonLayoutOrdersActionsAndStaysInsideWindow},
     {"ChromeHitTestCoversTitleButtonsTabsAndAddList", ChromeHitTestCoversTitleButtonsTabsAndAddList},
     {"TabStripNeverOverlapsAddList", TabStripNeverOverlapsAddList},
+    {"EmptyActivePromptUsesLargeClickTargetOnlyForTrulyEmptyList", EmptyActivePromptUsesLargeClickTargetOnlyForTrulyEmptyList},
     {"RowLayoutKeepsIndentControlsAndHitTestingInLockstep", RowLayoutKeepsIndentControlsAndHitTestingInLockstep},
     {"EditIntentMapsKeyboardWithoutLeakingControlCharacters", EditIntentMapsKeyboardWithoutLeakingControlCharacters},
     {"TitleAndTrayMenusDoNotExposeListManagementCommands", TitleAndTrayMenusDoNotExposeListManagementCommands},

@@ -63,7 +63,7 @@ private:
         int listIndex = -1;
         D2D1_RECT_F rect{};
     };
-    enum class HitKind { None, TreeToggle, Check, Text, Delete, Handle, Section, Clear, Add, ListTab, AddList, Pin, Close, Menu, Theme };
+    enum class HitKind { None, TreeToggle, Check, Text, Delete, Handle, Section, Clear, EmptyActive, ListTab, AddList, Pin, Close, Menu, Theme };
     struct Hit { HitKind kind = HitKind::None; int rowIndex = -1; int itemIndex = -1; };
 
     void  RebuildLayout();
@@ -81,7 +81,7 @@ private:
     void DrawTitleBar();
     void DrawListTabs();
     void DrawSection(); // 已完成折叠条（内容层，文档坐标）
-    void DrawAddRow(bool hovered); // 未完成项后的新增入口（内容层）
+    void DrawEmptyActivePrompt(bool hovered); // 当前列表没有未完成项时的点击入口
     void FillRect(const D2D1_RECT_F& r, uint32_t rgb, float a = 1.0f);
     void StrokeRect(const D2D1_RECT_F& r, uint32_t rgb, float w, float a = 1.0f);
     void FillRoundRect(const D2D1_ROUNDED_RECT& rr, uint32_t rgb, float a = 1.0f);
@@ -171,6 +171,7 @@ private:
     void TogglePin();
     void ToggleCompletedExpanded();
     void ToggleAutostart();
+    void CreateEmptyActiveItem();
     void DeleteItem(int itemIndex);
     void ClearCompletedConfirm();
     void HideToTray();
@@ -211,7 +212,8 @@ private:
     std::vector<ListTabLayout> listTabs_;
     float       scroll_       = 0.0f;
     float       contentH_     = 0.0f;
-    D2D1_RECT_F addRect_{};     // 新增入口（文档坐标，位于未完成项之后）
+    float       activeEndY_   = 0.0f; // 未完成段末尾 y，用于拖拽插入线
+    D2D1_RECT_F emptyActiveRect_{}; // 当前列表没有未完成项时的点击入口（文档坐标）
     D2D1_RECT_F sectionRect_{}; // 已完成折叠条（文档坐标）
     D2D1_RECT_F clearRect_{};   // 清空已完成（文档坐标）
     D2D1_RECT_F pinRect_{};     // 置顶按钮（固定）

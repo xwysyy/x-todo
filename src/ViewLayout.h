@@ -66,6 +66,8 @@ struct ChromeHitResult {
 TitleButtons ComputeTitleButtons(float windowWidth, float dpiScale);
 TabStrip ComputeTabStrip(float windowWidth, float dpiScale, const std::vector<TabMetric>& tabs);
 RowControls ComputeRowControls(float windowWidth, float docY, float rowHeight, int level, float dpiScale);
+Gui::Rect ComputeEmptyActivePrompt(float windowWidth, float docY, float viewportHeight,
+                                   bool listEmpty, float dpiScale);
 
 RowHit HitTestRowControls(const RowControls& row, float x, float docY, bool hasChildren, bool completed);
 ChromeHitResult HitTestChrome(float x, float y, float dpiScale,

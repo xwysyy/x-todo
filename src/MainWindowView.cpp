@@ -32,7 +32,7 @@ std::wstring Trim(const std::wstring& s) {
 }
 
 int RoundToInt(float v) { return (int)(v >= 0.0f ? v + 0.5f : v - 0.5f); }
-constexpr int kHoverAddRow = -2;
+constexpr int kHoverEmptyActive = -2;
 
 std::wstring ReadWindowText(HWND hwnd) {
     int len = GetWindowTextLengthW(hwnd);
@@ -127,6 +127,8 @@ void MainWindow::RebuildLayout() {
         if (r.strikeLayout) { r.strikeLayout->Release(); r.strikeLayout = nullptr; }
     rows_.clear();
     listTabs_.clear();
+    activeEndY_ = 0.0f;
+    emptyActiveRect_ = D2D1::RectF(0, 0, 0, 0);
     addListRect_ = D2D1::RectF(0, 0, 0, 0);
 
     RECT rc;
@@ -174,8 +176,12 @@ void MainWindow::RebuildLayout() {
         i = model_.Items()[(size_t)i].collapsed ? model_.SubtreeEnd(i) : i + 1;
     }
 
-    addRect_ = D2D1::RectF(pad, docY, W - pad, docY + baseRowH);
-    docY += baseRowH;
+    activeEndY_ = docY;
+    if (active == 0) {
+        emptyActiveRect_ = ToD2DRect(GuiLayout::ComputeEmptyActivePrompt(
+            W, docY, ViewportHeight(), total == 0, dpiScale()));
+        docY = emptyActiveRect_.bottom;
+    }
 
     if (total - active > 0) {
         sectionRect_ = D2D1::RectF(pad, docY, W - pad, docY + S(Theme::kSectionH));
@@ -268,8 +274,8 @@ MainWindow::Hit MainWindow::HitTest(float x, float y) {
     float docY = y - ContentTop() + scroll_;
     D2D1_POINT_2F dp{ x, docY };
 
-    if (addRect_.bottom > addRect_.top && InRect(addRect_, dp)) {
-        h.kind = HitKind::Add;
+    if (emptyActiveRect_.bottom > emptyActiveRect_.top && InRect(emptyActiveRect_, dp)) {
+        h.kind = HitKind::EmptyActive;
         return h;
     }
 
@@ -548,26 +554,33 @@ void MainWindow::DrawListTabs() {
     }
 }
 
-void MainWindow::DrawAddRow(bool hovered) {
-    if (addRect_.bottom <= addRect_.top) return;
-    if (hovered) FillRect(addRect_, theme_.colors.rowHover); // 最终消费色，不再混 alpha
+void MainWindow::DrawEmptyActivePrompt(bool hovered) {
+    if (emptyActiveRect_.bottom <= emptyActiveRect_.top) return;
 
-    const float size = S(Theme::kCheckSize);
-    const float cy = (addRect_.top + addRect_.bottom) / 2.0f;
-    int level = 0;
-    for (const RowLayout& r : rows_) {
-        if (r.completed) break;
-        level = ClampTodoLevel(model_.Items()[r.itemIndex].level);
+    const bool emptyList = model_.Count() == 0;
+    if (emptyList) {
+        const float radius = S(8);
+        DrawSurfaceFrame(emptyActiveRect_, radius,
+                         hovered ? theme_.colors.rowHover : theme_.colors.paper,
+                         hovered ? theme_.colors.focusRing : theme_.colors.paperEdge,
+                         hovered ? S(1.2f) : S(1.0f));
+
+        D2D1_RECT_F titleRect = emptyActiveRect_;
+        titleRect.bottom = (emptyActiveRect_.top + emptyActiveRect_.bottom) / 2.0f;
+        titleRect.top += S(12);
+        Text(T(Str::EmptyListTitle, lang_), titleRect, theme_.colors.text, textFormat_);
+
+        D2D1_RECT_F promptRect = emptyActiveRect_;
+        promptRect.top = titleRect.bottom - S(2);
+        promptRect.bottom -= S(12);
+        Text(T(Str::EmptyActivePrompt, lang_), promptRect,
+             hovered ? theme_.colors.checkFill : theme_.colors.textWeak, smallFormat_);
+        return;
     }
-    const float left = addRect_.left + S(18) * (float)level;
-    D2D1_RECT_F icon = D2D1::RectF(left, cy - size / 2.0f,
-                                   left + size, cy + size / 2.0f);
-    const float cx = (float)RoundToInt((icon.left + icon.right) * 0.5f) + 0.5f;
-    const float iy = (icon.top + icon.bottom) * 0.5f;
-    const float half = S(6);
-    brush_->SetColor(Theme::D2DColor(hovered ? theme_.colors.checkFill : theme_.colors.handle));
-    rt_->DrawLine(D2D1::Point2F(cx - half, iy), D2D1::Point2F(cx + half, iy), brush_, S(1.6f));
-    rt_->DrawLine(D2D1::Point2F(cx, iy - half), D2D1::Point2F(cx, iy + half), brush_, S(1.6f));
+
+    if (hovered) FillRect(emptyActiveRect_, theme_.colors.rowHover);
+    Text(T(Str::EmptyActivePrompt, lang_), emptyActiveRect_,
+         hovered ? theme_.colors.checkFill : theme_.colors.textWeak, smallFormat_);
 }
 
 bool MainWindow::Render() {
@@ -611,13 +624,13 @@ bool MainWindow::Render() {
     rt_->PushAxisAlignedClip(vp, D2D1_ANTIALIAS_MODE_ALIASED);
     rt_->SetTransform(D2D1::Matrix3x2F::Translation(0, ContentTop() - scroll_));
 
+    DrawEmptyActivePrompt(hoverRow_ == kHoverEmptyActive);
     for (size_t i = 0; i < rows_.size(); i++)
         DrawRow(rows_[i], (int)i == hoverRow_);
-    DrawAddRow(hoverRow_ == kHoverAddRow);
     DrawSection();
 
     if (dragging_ && dragInsert_ >= 0) {
-        float yy = addRect_.top;
+        float yy = activeEndY_;
         for (const RowLayout& r : rows_) {
             if (!r.completed && r.itemIndex == dragInsert_) { yy = r.row.top; break; }
         }
@@ -789,23 +802,13 @@ void MainWindow::OnLButtonUp(float x, float y) {
     case HitKind::Clear:   ClearCompletedConfirm();   break;
     case HitKind::ListTab: SwitchList(h.itemIndex);   break;
     case HitKind::AddList: CreateList();              break;
+    case HitKind::EmptyActive:
+        CreateEmptyActiveItem();
+        break;
     case HitKind::Menu:    ShowTitleMenu();           break;
     case HitKind::Theme:   ShowThemeMenu();           break;
     case HitKind::Pin:     TogglePin();               break;
     case HitKind::Close:   HideToTray();              break;
-    case HitKind::Add: {
-        int level = 0;
-        for (const RowLayout& r : rows_) {
-            if (r.completed) break;
-            level = ClampTodoLevel(model_.Items()[r.itemIndex].level);
-        }
-        int n = model_.AddActive(L"", level);
-        RebuildLayout();
-        ScrollItemIntoView(n);
-        RefreshTrayIcon();
-        BeginEdit(n);
-        break;
-    }
     default: break;
     }
     pressHit_ = Hit{};
@@ -844,7 +847,7 @@ void MainWindow::OnMouseMove(float x, float y, bool lButton) {
         return;
     }
     Hit h = HitTest(x, y);
-    int hover = (h.kind == HitKind::Add) ? kHoverAddRow : h.rowIndex;
+    int hover = (h.kind == HitKind::EmptyActive) ? kHoverEmptyActive : h.rowIndex;
     if (hover != hoverRow_) {
         hoverRow_ = hover;
         InvalidateRect(hwnd_, nullptr, FALSE);

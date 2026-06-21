@@ -15,7 +15,9 @@ const wchar_t* T(Str key, Lang lang) {
         case Str::Autostart:     return zh ? L"开机自启"        : L"Start with Windows";
         case Str::ToggleLang:    return zh ? L"English"         : L"中文"; // 显示可切换到的目标语言
         case Str::Exit:          return zh ? L"退出"            : L"Exit";
-        case Str::NewItem:       return zh ? L"＋ 新增一条"     : L"＋ New item";
+        case Str::EmptyListTitle:return zh ? L"当前列表为空"    : L"This list is empty";
+        case Str::EmptyActivePrompt:
+                                  return zh ? L"点击创建第一条" : L"Click to create the first item";
         case Str::ListNamePrompt:return zh ? L"标签页名称"      : L"List name";
         case Str::ListDefault:   return zh ? L"默认"            : L"Inbox";
         case Str::ListRename:    return zh ? L"重命名标签页"    : L"Rename list";
