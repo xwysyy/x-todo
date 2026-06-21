@@ -22,6 +22,11 @@ if(XTODO_BUILD_APP)
         src/main.cpp
         src/MainWindow.cpp
         src/MainWindowView.cpp
+        src/EditIntent.cpp
+        src/GeometryPolicy.cpp
+        src/MenuModel.cpp
+        src/ViewLayout.cpp
+        src/WindowHitTest.cpp
         src/TodoModel.cpp
         src/Store.cpp
         src/StoreFormat.cpp

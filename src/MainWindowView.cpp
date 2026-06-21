@@ -1,5 +1,8 @@
 #include "MainWindow.h"
+#include "EditIntent.h"
 #include "Theme.h"
+#include "ViewLayout.h"
+#include "WindowHitTest.h"
 
 #include <commctrl.h>
 #include <cmath>
@@ -12,6 +15,15 @@ namespace {
 bool InRect(const D2D1_RECT_F& r, D2D1_POINT_2F p) {
     return p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom;
 }
+
+Gui::Rect ToGuiRect(const D2D1_RECT_F& r) {
+    return Gui::Rect{ r.left, r.top, r.right, r.bottom };
+}
+
+D2D1_RECT_F ToD2DRect(const Gui::Rect& r) {
+    return D2D1::RectF(r.left, r.top, r.right, r.bottom);
+}
+
 std::wstring Trim(const std::wstring& s) {
     size_t a = s.find_first_not_of(L" \t\r\n");
     if (a == std::wstring::npos) return L"";
@@ -123,11 +135,6 @@ void MainWindow::RebuildLayout() {
 
     const float pad     = S(Theme::kPadX);
     const float baseRowH = S(Theme::kRowH);
-    const float checkSz = S(Theme::kCheckSize);
-    const float handleW = S(18);
-    const float delW    = S(20);
-    const float gap     = S(6);
-    const float treeW   = S(14);
 
     float docY = 0;
     const int active = model_.ActiveCount();
@@ -138,12 +145,6 @@ void MainWindow::RebuildLayout() {
         r.itemIndex = itemIndex;
         r.completed = completed;
         const TodoItem& item = model_.Items()[itemIndex];
-        const float indent = S(18) * (float)ClampTodoLevel(item.level);
-        const float treeLeft = pad + indent;
-        const float checkLeft = treeLeft + treeW;
-        const float textLeft = checkLeft + checkSz + S(8);
-        float textRight = W - pad - handleW - gap - delW - gap;
-        if (textRight < textLeft + S(20)) textRight = textLeft + S(20);
         std::wstring measureText;
         const std::wstring& savedText = item.text;
         const std::wstring* text = &savedText;
@@ -151,14 +152,17 @@ void MainWindow::RebuildLayout() {
             measureText = ReadWindowText(edit_);
             text = &measureText;
         }
-        const float rowH = MeasureRowHeight(*text, textRight - textLeft);
-        r.row    = D2D1::RectF(pad, docY, W - pad, docY + rowH);
-        const float controlTop = docY + S(7);
-        r.disclosure = D2D1::RectF(treeLeft, controlTop, treeLeft + treeW, controlTop + S(20));
-        r.check  = D2D1::RectF(checkLeft, docY + S(8), checkLeft + checkSz, docY + S(8) + checkSz);
-        r.handle = D2D1::RectF(W - pad - handleW, controlTop, W - pad, controlTop + S(20));
-        r.del    = D2D1::RectF(r.handle.left - gap - delW, controlTop, r.handle.left - gap, controlTop + delW);
-        r.text   = D2D1::RectF(textLeft, docY, textRight, docY + rowH);
+        const GuiLayout::RowControls baseControls =
+            GuiLayout::ComputeRowControls(W, docY, baseRowH, item.level, dpiScale());
+        const float rowH = MeasureRowHeight(*text, baseControls.text.Width());
+        const GuiLayout::RowControls finalControls =
+            GuiLayout::ComputeRowControls(W, docY, rowH, item.level, dpiScale());
+        r.row        = ToD2DRect(finalControls.row);
+        r.disclosure = ToD2DRect(finalControls.disclosure);
+        r.check      = ToD2DRect(finalControls.check);
+        r.text       = ToD2DRect(finalControls.text);
+        r.del        = ToD2DRect(finalControls.del);
+        r.handle     = ToD2DRect(finalControls.handle);
         r.hasChildren = model_.HasChildren(itemIndex);
         r.collapsed = item.collapsed;
         rows_.push_back(r);
@@ -189,42 +193,23 @@ void MainWindow::RebuildLayout() {
     }
     contentH_ = docY;
 
-    // 标题栏按钮（固定客户坐标）
-    const float btn = S(24), m = S(8);
-    const float ty  = (S(Theme::kTitleH) - btn) / 2;
-    closeRect_ = D2D1::RectF(W - m - btn, ty, W - m, ty + btn);
-    pinRect_   = D2D1::RectF(closeRect_.left - S(4) - btn, ty, closeRect_.left - S(4), ty + btn);
-    themeRect_ = D2D1::RectF(pinRect_.left - S(4) - btn, ty, pinRect_.left - S(4), ty + btn);
-    menuRect_  = D2D1::RectF(themeRect_.left - S(4) - btn, ty, themeRect_.left - S(4), ty + btn);
+    const GuiLayout::TitleButtons title = GuiLayout::ComputeTitleButtons(W, dpiScale());
+    closeRect_ = ToD2DRect(title.close);
+    pinRect_   = ToD2DRect(title.pin);
+    themeRect_ = ToD2DRect(title.theme);
+    menuRect_  = ToD2DRect(title.menu);
 
-    // 多列表标签栏（固定客户坐标）
-    const float tabTop = S(Theme::kTitleH);
-    const float tabsH = S(Theme::kTabsH);
-    const float addSize = S(24);
-    const float tabGap = S(6);
-    addListRect_ = D2D1::RectF(W - pad - addSize, tabTop + (tabsH - addSize) / 2.0f,
-                               W - pad, tabTop + (tabsH + addSize) / 2.0f);
-    float x = pad;
-    const float maxRight = addListRect_.left - tabGap;
-    const float tabMinW = S(52);
-    const float tabMaxW = S(118);
-    const float tabH = S(28);
-    const float tabY = tabTop + (tabsH - tabH) / 2.0f;
+    std::vector<GuiLayout::TabMetric> tabMetrics;
+    tabMetrics.reserve((size_t)model_.ListCount());
     for (int i = 0; i < model_.ListCount(); ++i) {
         const TodoList* list = model_.ListAt(i);
         if (!list) continue;
-        wchar_t countBuf[16];
-        swprintf_s(countBuf, L"%d", list->activeCount);
-        const float titleW = S(7.0f) * (float)list->title.size();
-        const float countW = list->activeCount > 0
-            ? S(15.0f + 6.0f * (float)wcslen(countBuf))
-            : 0.0f;
-        float wantW = S(20) + titleW + (countW > 0.0f ? S(7) + countW : 0.0f);
-        if (wantW < tabMinW) wantW = tabMinW;
-        if (wantW > tabMaxW) wantW = tabMaxW;
-        if (x + wantW > maxRight) break;
-        listTabs_.push_back(ListTabLayout{ i, D2D1::RectF(x, tabY, x + wantW, tabY + tabH) });
-        x += wantW + tabGap;
+        tabMetrics.push_back(GuiLayout::TabMetric{ i, list->title.size(), list->activeCount });
+    }
+    const GuiLayout::TabStrip tabStrip = GuiLayout::ComputeTabStrip(W, dpiScale(), tabMetrics);
+    addListRect_ = ToD2DRect(tabStrip.addList);
+    for (const GuiLayout::TabRect& tab : tabStrip.tabs) {
+        listTabs_.push_back(ListTabLayout{ tab.listIndex, ToD2DRect(tab.rect) });
     }
 }
 
@@ -251,25 +236,33 @@ float MainWindow::MeasureRowHeight(const std::wstring& text, float textWidth) {
 
 MainWindow::Hit MainWindow::HitTest(float x, float y) {
     Hit h;
-    D2D1_POINT_2F p{ x, y };
 
-    if (y < S(Theme::kTitleH)) {
-        if (InRect(menuRect_, p))  { h.kind = HitKind::Menu;  return h; }
-        if (InRect(themeRect_, p)) { h.kind = HitKind::Theme; return h; }
-        if (InRect(pinRect_, p))   { h.kind = HitKind::Pin;   return h; }
-        if (InRect(closeRect_, p)) { h.kind = HitKind::Close; return h; }
-        return h; // 标题栏空白 -> 交给 NCHITTEST 拖动
-    }
     if (y < ContentTop()) {
-        if (InRect(addListRect_, p)) { h.kind = HitKind::AddList; return h; }
-        for (const ListTabLayout& tab : listTabs_) {
-            if (InRect(tab.rect, p)) {
-                h.kind = HitKind::ListTab;
-                h.itemIndex = tab.listIndex;
-                return h;
-            }
+        GuiLayout::TitleButtons title;
+        title.close = ToGuiRect(closeRect_);
+        title.pin = ToGuiRect(pinRect_);
+        title.theme = ToGuiRect(themeRect_);
+        title.menu = ToGuiRect(menuRect_);
+        std::vector<GuiLayout::TabRect> tabs;
+        tabs.reserve(listTabs_.size());
+        for (const ListTabLayout& tab : listTabs_)
+            tabs.push_back(GuiLayout::TabRect{ tab.listIndex, ToGuiRect(tab.rect) });
+
+        const GuiLayout::ChromeHitResult chrome =
+            GuiLayout::HitTestChrome(x, y, dpiScale(), title, ToGuiRect(addListRect_), tabs);
+        switch (chrome.kind) {
+        case GuiLayout::ChromeHit::Menu:    h.kind = HitKind::Menu;    return h;
+        case GuiLayout::ChromeHit::Theme:   h.kind = HitKind::Theme;   return h;
+        case GuiLayout::ChromeHit::Pin:     h.kind = HitKind::Pin;     return h;
+        case GuiLayout::ChromeHit::Close:   h.kind = HitKind::Close;   return h;
+        case GuiLayout::ChromeHit::AddList: h.kind = HitKind::AddList; return h;
+        case GuiLayout::ChromeHit::ListTab:
+            h.kind = HitKind::ListTab;
+            h.itemIndex = chrome.listIndex;
+            return h;
+        case GuiLayout::ChromeHit::None:
+            return h; // 标题栏空白交给 NCHITTEST 拖动；标签栏空白无动作
         }
-        return h;
     }
 
     float docY = y - ContentTop() + scroll_;
@@ -292,11 +285,21 @@ MainWindow::Hit MainWindow::HitTest(float x, float y) {
         if (docY >= r.row.top && docY < r.row.bottom) {
             h.rowIndex = (int)i;
             h.itemIndex = r.itemIndex;
-            if (r.hasChildren && InRect(r.disclosure, dp)) { h.kind = HitKind::TreeToggle; return h; }
-            if (InRect(r.check, dp))                  { h.kind = HitKind::Check;  return h; }
-            if (InRect(r.del, dp))                    { h.kind = HitKind::Delete; return h; }
-            if (!r.completed && InRect(r.handle, dp)) { h.kind = HitKind::Handle; return h; }
-            if (!r.completed && InRect(r.text, dp))   { h.kind = HitKind::Text;   return h; }
+            GuiLayout::RowControls controls;
+            controls.row = ToGuiRect(r.row);
+            controls.disclosure = ToGuiRect(r.disclosure);
+            controls.check = ToGuiRect(r.check);
+            controls.text = ToGuiRect(r.text);
+            controls.del = ToGuiRect(r.del);
+            controls.handle = ToGuiRect(r.handle);
+            switch (GuiLayout::HitTestRowControls(controls, x, docY, r.hasChildren, r.completed)) {
+            case GuiLayout::RowHit::TreeToggle: h.kind = HitKind::TreeToggle; return h;
+            case GuiLayout::RowHit::Check:      h.kind = HitKind::Check;      return h;
+            case GuiLayout::RowHit::Text:       h.kind = HitKind::Text;       return h;
+            case GuiLayout::RowHit::Delete:     h.kind = HitKind::Delete;     return h;
+            case GuiLayout::RowHit::Handle:     h.kind = HitKind::Handle;     return h;
+            case GuiLayout::RowHit::None:       break;
+            }
             return h;
         }
     }
@@ -863,34 +866,37 @@ void MainWindow::OnMouseWheel(int delta) {
 }
 
 LRESULT MainWindow::OnNcHitTest(int sx, int sy) {
-    if (mountMode_ == MountMode::Capsule && (capsuleShrunk() || animActive_))
-        return HTCLIENT; // 折叠 / 动画中的胶囊保持固定形状，不进入系统缩放
     POINT p{ sx, sy };
     ScreenToClient(hwnd_, &p);
     RECT rc;
     GetClientRect(hwnd_, &rc);
-    // 标题栏按钮优先于缩放边缘：避免加宽 resize 边后吞掉按钮顶部像素
-    D2D1_POINT_2F bpt{ (float)p.x, (float)p.y };
-    if (InRect(menuRect_, bpt) || InRect(themeRect_, bpt) ||
-        InRect(pinRect_, bpt) || InRect(closeRect_, bpt))
-        return HTCLIENT;
-    float e = S(Theme::kResizeEdge);
-    bool L = p.x < e, R = p.x >= rc.right - e, T = p.y < e, B = p.y >= rc.bottom - e;
-    if (T && L) return HTTOPLEFT;
-    if (T && R) return HTTOPRIGHT;
-    if (B && L) return HTBOTTOMLEFT;
-    if (B && R) return HTBOTTOMRIGHT;
-    if (L) return HTLEFT;
-    if (R) return HTRIGHT;
-    if (T) return HTTOP;
-    if (B) return HTBOTTOM;
 
-    if (p.y < S(Theme::kTitleH)) {
-        D2D1_POINT_2F pt{ (float)p.x, (float)p.y };
-        if (InRect(menuRect_, pt) || InRect(themeRect_, pt) ||
-            InRect(pinRect_, pt) || InRect(closeRect_, pt)) return HTCLIENT;
-        if (mountMode_ == MountMode::Capsule) return HTCLIENT;
-        return HTCAPTION;
+    GuiHit::Input input;
+    input.x = (float)p.x;
+    input.y = (float)p.y;
+    input.width = (float)(rc.right - rc.left);
+    input.height = (float)(rc.bottom - rc.top);
+    input.dpiScale = dpiScale();
+    input.titleHeight = Theme::kTitleH;
+    input.resizeEdge = Theme::kResizeEdge;
+    input.forceClient = mountMode_ == MountMode::Capsule && (capsuleShrunk() || animActive_);
+    input.capsuleMode = mountMode_ == MountMode::Capsule;
+    input.menu = ToGuiRect(menuRect_);
+    input.theme = ToGuiRect(themeRect_);
+    input.pin = ToGuiRect(pinRect_);
+    input.close = ToGuiRect(closeRect_);
+
+    switch (GuiHit::HitTestNonClient(input)) {
+    case GuiHit::NonClientHit::Client:      return HTCLIENT;
+    case GuiHit::NonClientHit::Caption:     return HTCAPTION;
+    case GuiHit::NonClientHit::Left:        return HTLEFT;
+    case GuiHit::NonClientHit::Right:       return HTRIGHT;
+    case GuiHit::NonClientHit::Top:         return HTTOP;
+    case GuiHit::NonClientHit::Bottom:      return HTBOTTOM;
+    case GuiHit::NonClientHit::TopLeft:     return HTTOPLEFT;
+    case GuiHit::NonClientHit::TopRight:    return HTTOPRIGHT;
+    case GuiHit::NonClientHit::BottomLeft:  return HTBOTTOMLEFT;
+    case GuiHit::NonClientHit::BottomRight: return HTBOTTOMRIGHT;
     }
     return HTCLIENT;
 }
@@ -1019,11 +1025,25 @@ LRESULT CALLBACK MainWindow::EditProcStatic(HWND h, UINT m, WPARAM w, LPARAM l,
     switch (m) {
     case WM_GETDLGCODE:
         return DefSubclassProc(h, m, w, l) | DLGC_WANTTAB;
-    case WM_KEYDOWN:
-        if (w == VK_RETURN) { self->CommitEdit(true);  return 0; }
-        if (w == VK_ESCAPE) { self->CancelEdit();      return 0; }
-        if (w == VK_TAB) {
-            const bool outdent = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    case WM_KEYDOWN: {
+        GuiEdit::Key key = GuiEdit::Key::Other;
+        if (w == VK_RETURN) key = GuiEdit::Key::Enter;
+        else if (w == VK_ESCAPE) key = GuiEdit::Key::Escape;
+        else if (w == VK_TAB) key = GuiEdit::Key::Tab;
+        else if (w == VK_DELETE) key = GuiEdit::Key::DeleteKey;
+
+        const bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        const GuiEdit::Intent intent = GuiEdit::KeyDownIntent(key, shiftDown);
+        switch (intent) {
+        case GuiEdit::Intent::CommitAndAddNext:
+            self->CommitEdit(true);
+            return 0;
+        case GuiEdit::Intent::Cancel:
+            self->CancelEdit();
+            return 0;
+        case GuiEdit::Intent::Indent:
+        case GuiEdit::Intent::Outdent: {
+            const bool outdent = intent == GuiEdit::Intent::Outdent;
             bool changed = outdent
                 ? self->model_.OutdentItem(self->editIndex_)
                 : self->model_.IndentItemUnder(self->editIndex_,
@@ -1034,14 +1054,18 @@ LRESULT CALLBACK MainWindow::EditProcStatic(HWND h, UINT m, WPARAM w, LPARAM l,
             }
             return 0;
         }
-        if (w == VK_DELETE) {
+        case GuiEdit::Intent::RefreshAfterDefault: {
             LRESULT r = DefSubclassProc(h, m, w, l);
             refresh();
             return r;
         }
+        case GuiEdit::Intent::None:
+            break;
+        }
         break;
+    }
     case WM_CHAR:
-        if (w == 0x09 || w == 0x0D || w == 0x1B) return 0; // 吞掉 Tab/回车/Esc 的字符，避免提示音
+        if (GuiEdit::SuppressChar((wchar_t)w)) return 0; // 吞掉 Tab/回车/Esc 的字符，避免提示音
         {
             LRESULT r = DefSubclassProc(h, m, w, l);
             refresh();

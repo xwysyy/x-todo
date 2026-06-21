@@ -1,0 +1,360 @@
+#include "EditIntent.h"
+#include "GeometryPolicy.h"
+#include "MenuModel.h"
+#include "Theme.h"
+#include "ViewLayout.h"
+#include "WindowHitTest.h"
+#include "test_framework.h"
+
+#include <string>
+#include <vector>
+
+using namespace xtodo_test;
+
+namespace {
+
+float Mid(float a, float b) {
+    return (a + b) / 2.0f;
+}
+
+bool HasCommand(const std::vector<GuiMenu::Item>& items, GuiMenu::Command command) {
+    for (const GuiMenu::Item& item : items) {
+        if (!item.separator && item.cmd == command) return true;
+    }
+    return false;
+}
+
+const GuiMenu::Item* FindCommand(const std::vector<GuiMenu::Item>& items, GuiMenu::Command command) {
+    for (const GuiMenu::Item& item : items) {
+        if (!item.separator && item.cmd == command) return &item;
+    }
+    return nullptr;
+}
+
+GuiHit::Input BaseHitInput() {
+    GuiHit::Input input;
+    input.width = 260.0f;
+    input.height = 340.0f;
+    input.dpiScale = 1.0f;
+    input.titleHeight = Theme::kTitleH;
+    input.resizeEdge = Theme::kResizeEdge;
+    return input;
+}
+
+void NonClientHitTestPrioritizesTitleButtonsOverResizeBand() {
+    const GuiLayout::TitleButtons title = GuiLayout::ComputeTitleButtons(260.0f, 1.0f);
+
+    GuiHit::Input input = BaseHitInput();
+    input.menu = title.menu;
+    input.theme = title.theme;
+    input.pin = title.pin;
+    input.close = title.close;
+    input.x = Mid(title.menu.left, title.menu.right);
+    input.y = title.menu.top + 1.0f;
+
+    EXPECT_TRUE(input.y < Theme::kResizeEdge);
+    EXPECT_EQ(GuiHit::HitTestNonClient(input), GuiHit::NonClientHit::Client);
+}
+
+void NonClientHitTestMapsEdgesCornersCaptionAndCapsule() {
+    GuiHit::Input input = BaseHitInput();
+    input.x = 0.0f;
+    input.y = 0.0f;
+    EXPECT_EQ(GuiHit::HitTestNonClient(input), GuiHit::NonClientHit::TopLeft);
+
+    input.x = 259.0f;
+    input.y = 339.0f;
+    EXPECT_EQ(GuiHit::HitTestNonClient(input), GuiHit::NonClientHit::BottomRight);
+
+    input.x = 20.0f;
+    input.y = 50.0f;
+    EXPECT_EQ(GuiHit::HitTestNonClient(input), GuiHit::NonClientHit::Client);
+
+    input.x = 40.0f;
+    input.y = 20.0f;
+    EXPECT_EQ(GuiHit::HitTestNonClient(input), GuiHit::NonClientHit::Caption);
+
+    input.capsuleMode = true;
+    EXPECT_EQ(GuiHit::HitTestNonClient(input), GuiHit::NonClientHit::Client);
+}
+
+void NonClientHitTestScalesResizeEdgeAndCanForceClient() {
+    GuiHit::Input input = BaseHitInput();
+    input.dpiScale = 1.5f;
+    input.x = 11.0f;
+    input.y = 80.0f;
+    EXPECT_EQ(GuiHit::HitTestNonClient(input), GuiHit::NonClientHit::Left);
+
+    input.x = 12.0f;
+    EXPECT_EQ(GuiHit::HitTestNonClient(input), GuiHit::NonClientHit::Client);
+
+    input.forceClient = true;
+    input.x = 0.0f;
+    input.y = 0.0f;
+    EXPECT_EQ(GuiHit::HitTestNonClient(input), GuiHit::NonClientHit::Client);
+}
+
+void GeometryPolicyScalesMinimumAndRejectsSubminimumCaptures() {
+    const GuiGeometry::Size min = GuiGeometry::MinimumTrackSize(1.5f);
+    EXPECT_EQ(min.w, 330);
+    EXPECT_EQ(min.h, 240);
+
+    EXPECT_TRUE(GuiGeometry::AcceptsGeometrySize(330, 240, 1.5f));
+    EXPECT_FALSE(GuiGeometry::AcceptsGeometrySize(329, 240, 1.5f));
+    EXPECT_FALSE(GuiGeometry::AcceptsGeometrySize(330, 239, 1.5f));
+
+    EXPECT_TRUE(GuiGeometry::AcceptsLoadedGeometrySize(330, 240, 1.5f));
+    EXPECT_FALSE(GuiGeometry::AcceptsLoadedGeometrySize(329, 240, 1.5f));
+    EXPECT_FALSE(GuiGeometry::AcceptsLoadedGeometrySize(GuiGeometry::kMaxLoadedWindowW + 1, 240, 1.0f));
+    EXPECT_FALSE(GuiGeometry::AcceptsLoadedGeometrySize(330, GuiGeometry::kMaxLoadedWindowH + 1, 1.0f));
+}
+
+void GeometryCapturePolicyMatchesWindowModes() {
+    GuiGeometry::CaptureInput input;
+    input.w = 260;
+    input.h = 340;
+    input.dpiScale = 1.0f;
+
+    input.mountMode = GuiGeometry::MountMode::Normal;
+    GuiGeometry::CaptureDecision decision = GuiGeometry::DecideCapture(input);
+    EXPECT_TRUE(decision.accept);
+    EXPECT_TRUE(decision.capturePosition);
+    EXPECT_FALSE(decision.captureDock);
+
+    input.mountMode = GuiGeometry::MountMode::Desktop;
+    decision = GuiGeometry::DecideCapture(input);
+    EXPECT_TRUE(decision.accept);
+    EXPECT_TRUE(decision.capturePosition);
+    EXPECT_FALSE(decision.captureDock);
+
+    input.mountMode = GuiGeometry::MountMode::Capsule;
+    input.capsuleExpanded = false;
+    decision = GuiGeometry::DecideCapture(input);
+    EXPECT_FALSE(decision.accept);
+
+    input.capsuleExpanded = true;
+    decision = GuiGeometry::DecideCapture(input);
+    EXPECT_TRUE(decision.accept);
+    EXPECT_FALSE(decision.capturePosition);
+    EXPECT_TRUE(decision.captureDock);
+
+    input.animActive = true;
+    decision = GuiGeometry::DecideCapture(input);
+    EXPECT_FALSE(decision.accept);
+
+    EXPECT_TRUE(GuiGeometry::ShouldCaptureBeforeModeSwitch(false));
+    EXPECT_FALSE(GuiGeometry::ShouldCaptureBeforeModeSwitch(true));
+}
+
+void ExpandedGeometryUsesStoredSizeAndClampsToWorkArea() {
+    GuiGeometry::Size size = GuiGeometry::ExpandedSize(true, 500, 420, 800, 600);
+    EXPECT_EQ(size.w, 500);
+    EXPECT_EQ(size.h, 420);
+
+    size = GuiGeometry::ExpandedSize(true, 900, 700, 800, 600);
+    EXPECT_EQ(size.w, 800);
+    EXPECT_EQ(size.h, 600);
+
+    size = GuiGeometry::ExpandedSize(false, 0, 0, 0, 0);
+    EXPECT_EQ(size.w, GuiGeometry::kDefaultWindowW + 40);
+    EXPECT_EQ(size.h, GuiGeometry::kDefaultWindowH + 40);
+}
+
+void TitleButtonLayoutOrdersActionsAndStaysInsideWindow() {
+    const GuiLayout::TitleButtons title = GuiLayout::ComputeTitleButtons(260.0f, 1.0f);
+
+    EXPECT_TRUE(title.menu.left < title.theme.left);
+    EXPECT_TRUE(title.theme.left < title.pin.left);
+    EXPECT_TRUE(title.pin.left < title.close.left);
+    EXPECT_EQ(title.close.right, 252.0f);
+    EXPECT_EQ(title.close.Width(), 24.0f);
+    EXPECT_EQ(title.menu.top, 5.0f);
+    EXPECT_EQ(title.close.bottom, 29.0f);
+}
+
+void ChromeHitTestCoversTitleButtonsTabsAndAddList() {
+    const GuiLayout::TitleButtons title = GuiLayout::ComputeTitleButtons(260.0f, 1.0f);
+    const std::vector<GuiLayout::TabMetric> metrics = {
+        GuiLayout::TabMetric{ 0, 5, 2 },
+        GuiLayout::TabMetric{ 1, 12, 0 },
+    };
+    const GuiLayout::TabStrip strip = GuiLayout::ComputeTabStrip(260.0f, 1.0f, metrics);
+    EXPECT_EQ(strip.tabs.size(), static_cast<size_t>(2));
+
+    GuiLayout::ChromeHitResult hit = GuiLayout::HitTestChrome(
+        Mid(title.menu.left, title.menu.right), Mid(title.menu.top, title.menu.bottom),
+        1.0f, title, strip.addList, strip.tabs);
+    EXPECT_EQ(hit.kind, GuiLayout::ChromeHit::Menu);
+
+    hit = GuiLayout::HitTestChrome(
+        Mid(strip.addList.left, strip.addList.right), Mid(strip.addList.top, strip.addList.bottom),
+        1.0f, title, strip.addList, strip.tabs);
+    EXPECT_EQ(hit.kind, GuiLayout::ChromeHit::AddList);
+
+    hit = GuiLayout::HitTestChrome(
+        Mid(strip.tabs[1].rect.left, strip.tabs[1].rect.right),
+        Mid(strip.tabs[1].rect.top, strip.tabs[1].rect.bottom),
+        1.0f, title, strip.addList, strip.tabs);
+    EXPECT_EQ(hit.kind, GuiLayout::ChromeHit::ListTab);
+    EXPECT_EQ(hit.listIndex, 1);
+}
+
+void TabStripNeverOverlapsAddList() {
+    std::vector<GuiLayout::TabMetric> metrics;
+    for (int i = 0; i < 12; ++i)
+        metrics.push_back(GuiLayout::TabMetric{ i, 24, i + 1 });
+
+    const GuiLayout::TabStrip strip = GuiLayout::ComputeTabStrip(260.0f, 1.0f, metrics);
+    EXPECT_TRUE(!strip.tabs.empty());
+    for (const GuiLayout::TabRect& tab : strip.tabs) {
+        EXPECT_TRUE(tab.rect.right <= strip.addList.left - 6.0f);
+        EXPECT_TRUE(tab.rect.left < tab.rect.right);
+        EXPECT_TRUE(tab.rect.top < tab.rect.bottom);
+    }
+    EXPECT_TRUE(strip.tabs.size() < metrics.size());
+}
+
+void RowLayoutKeepsIndentControlsAndHitTestingInLockstep() {
+    const GuiLayout::RowControls root = GuiLayout::ComputeRowControls(260.0f, 0.0f, 34.0f, 0, 1.0f);
+    const GuiLayout::RowControls child = GuiLayout::ComputeRowControls(260.0f, 0.0f, 34.0f, 2, 1.0f);
+
+    EXPECT_TRUE(child.check.left > root.check.left);
+    EXPECT_TRUE(child.text.left > root.text.left);
+    EXPECT_TRUE(child.text.right < child.del.left);
+    EXPECT_TRUE(child.del.right < child.handle.left);
+
+    EXPECT_EQ(GuiLayout::HitTestRowControls(child, Mid(child.disclosure.left, child.disclosure.right),
+                                            Mid(child.disclosure.top, child.disclosure.bottom),
+                                            true, false),
+              GuiLayout::RowHit::TreeToggle);
+    EXPECT_EQ(GuiLayout::HitTestRowControls(child, Mid(child.disclosure.left, child.disclosure.right),
+                                            Mid(child.disclosure.top, child.disclosure.bottom),
+                                            false, false),
+              GuiLayout::RowHit::None);
+    EXPECT_EQ(GuiLayout::HitTestRowControls(child, Mid(child.check.left, child.check.right),
+                                            Mid(child.check.top, child.check.bottom),
+                                            true, false),
+              GuiLayout::RowHit::Check);
+    EXPECT_EQ(GuiLayout::HitTestRowControls(child, Mid(child.text.left, child.text.right),
+                                            Mid(child.text.top, child.text.bottom),
+                                            true, false),
+              GuiLayout::RowHit::Text);
+    EXPECT_EQ(GuiLayout::HitTestRowControls(child, Mid(child.handle.left, child.handle.right),
+                                            Mid(child.handle.top, child.handle.bottom),
+                                            true, true),
+              GuiLayout::RowHit::None);
+}
+
+void EditIntentMapsKeyboardWithoutLeakingControlCharacters() {
+    EXPECT_EQ(GuiEdit::KeyDownIntent(GuiEdit::Key::Enter, false), GuiEdit::Intent::CommitAndAddNext);
+    EXPECT_EQ(GuiEdit::KeyDownIntent(GuiEdit::Key::Escape, false), GuiEdit::Intent::Cancel);
+    EXPECT_EQ(GuiEdit::KeyDownIntent(GuiEdit::Key::Tab, false), GuiEdit::Intent::Indent);
+    EXPECT_EQ(GuiEdit::KeyDownIntent(GuiEdit::Key::Tab, true), GuiEdit::Intent::Outdent);
+    EXPECT_EQ(GuiEdit::KeyDownIntent(GuiEdit::Key::DeleteKey, false), GuiEdit::Intent::RefreshAfterDefault);
+    EXPECT_EQ(GuiEdit::KeyDownIntent(GuiEdit::Key::Other, true), GuiEdit::Intent::None);
+
+    EXPECT_TRUE(GuiEdit::SuppressChar(L'\t'));
+    EXPECT_TRUE(GuiEdit::SuppressChar(L'\r'));
+    EXPECT_TRUE(GuiEdit::SuppressChar(0x1B));
+    EXPECT_FALSE(GuiEdit::SuppressChar(L'a'));
+}
+
+void TitleAndTrayMenusDoNotExposeListManagementCommands() {
+    GuiMenu::State state;
+    state.lang = Lang::En;
+    state.autostart = true;
+    state.mountMode = GuiMenu::MountMode::Capsule;
+    state.capsuleStyle = GuiMenu::CapsuleStyle::Dot;
+    state.listCount = 3;
+
+    const std::vector<GuiMenu::Item> tray = GuiMenu::BuildTrayMenu(state);
+    const std::vector<GuiMenu::Item> title = GuiMenu::BuildTitleMenu(state);
+
+    EXPECT_TRUE(HasCommand(tray, GuiMenu::kCmdShow));
+    EXPECT_FALSE(HasCommand(title, GuiMenu::kCmdShow));
+    EXPECT_TRUE(HasCommand(tray, GuiMenu::kCmdExit));
+    EXPECT_TRUE(HasCommand(title, GuiMenu::kCmdExit));
+
+    EXPECT_FALSE(HasCommand(tray, GuiMenu::kCmdListRename));
+    EXPECT_FALSE(HasCommand(tray, GuiMenu::kCmdListDelete));
+    EXPECT_FALSE(HasCommand(title, GuiMenu::kCmdListRename));
+    EXPECT_FALSE(HasCommand(title, GuiMenu::kCmdListDelete));
+
+    const GuiMenu::Item* dot = FindCommand(title, GuiMenu::kCmdStyleDot);
+    EXPECT_TRUE(dot != nullptr);
+    EXPECT_TRUE(dot->checked);
+}
+
+void ListTabMenuOwnsRenameAndDeletePolicy() {
+    std::vector<GuiMenu::Item> one = GuiMenu::BuildListTabMenu(Lang::Zh, 1);
+    const GuiMenu::Item* deleteOne = FindCommand(one, GuiMenu::kCmdListDelete);
+    EXPECT_TRUE(FindCommand(one, GuiMenu::kCmdListRename) != nullptr);
+    EXPECT_TRUE(deleteOne != nullptr);
+    EXPECT_FALSE(deleteOne->enabled);
+    EXPECT_TRUE(deleteOne->danger);
+
+    std::vector<GuiMenu::Item> many = GuiMenu::BuildListTabMenu(Lang::Zh, 2);
+    const GuiMenu::Item* deleteMany = FindCommand(many, GuiMenu::kCmdListDelete);
+    EXPECT_TRUE(deleteMany != nullptr);
+    EXPECT_TRUE(deleteMany->enabled);
+}
+
+void ThemeMenuBuildsStableCommandRangesAndCustomCap() {
+    Theme::ThemeVisual custom;
+    custom.id = "custom.a";
+    custom.name = { L"自定义 A", L"Custom A" };
+    std::vector<Theme::ThemeVisual> customs(9, custom);
+    for (int i = 0; i < 9; ++i) {
+        customs[(size_t)i].id = "custom." + std::to_string(i);
+        customs[(size_t)i].name = { L"自定义", L"Custom" };
+    }
+
+    GuiMenu::State state;
+    state.lang = Lang::En;
+    state.themeMode = "custom";
+    state.currentThemeId = "custom.3";
+    state.customThemes = &customs;
+
+    const std::vector<GuiMenu::Item> menu = GuiMenu::BuildThemeMenu(state);
+    EXPECT_TRUE(FindCommand(menu, GuiMenu::kCmdThemeFollowSystem) != nullptr);
+    EXPECT_EQ(std::string(GuiMenu::BuiltInThemeIdForCommand(GuiMenu::kCmdThemeBuiltinBase)), std::string("paper"));
+    EXPECT_EQ(std::string(GuiMenu::BuiltInThemeIdForCommand(GuiMenu::kCmdThemeBuiltinBase + 7)), std::string("contrast"));
+    EXPECT_TRUE(GuiMenu::BuiltInThemeIdForCommand(GuiMenu::kCmdThemeBuiltinBase + 8) == nullptr);
+
+    int customCount = 0;
+    bool currentCustomChecked = false;
+    for (const GuiMenu::Item& item : menu) {
+        if (item.cmd >= GuiMenu::kCmdThemeCustomBase &&
+            item.cmd < GuiMenu::kCmdThemeCustomBase + 8) {
+            ++customCount;
+            if (item.cmd == GuiMenu::kCmdThemeCustomBase + 3)
+                currentCustomChecked = item.checked;
+        }
+    }
+    EXPECT_EQ(customCount, 8);
+    EXPECT_TRUE(currentCustomChecked);
+    EXPECT_TRUE(HasCommand(menu, GuiMenu::kCmdThemeManager));
+}
+
+const TestCase kTests[] = {
+    {"NonClientHitTestPrioritizesTitleButtonsOverResizeBand", NonClientHitTestPrioritizesTitleButtonsOverResizeBand},
+    {"NonClientHitTestMapsEdgesCornersCaptionAndCapsule", NonClientHitTestMapsEdgesCornersCaptionAndCapsule},
+    {"NonClientHitTestScalesResizeEdgeAndCanForceClient", NonClientHitTestScalesResizeEdgeAndCanForceClient},
+    {"GeometryPolicyScalesMinimumAndRejectsSubminimumCaptures", GeometryPolicyScalesMinimumAndRejectsSubminimumCaptures},
+    {"GeometryCapturePolicyMatchesWindowModes", GeometryCapturePolicyMatchesWindowModes},
+    {"ExpandedGeometryUsesStoredSizeAndClampsToWorkArea", ExpandedGeometryUsesStoredSizeAndClampsToWorkArea},
+    {"TitleButtonLayoutOrdersActionsAndStaysInsideWindow", TitleButtonLayoutOrdersActionsAndStaysInsideWindow},
+    {"ChromeHitTestCoversTitleButtonsTabsAndAddList", ChromeHitTestCoversTitleButtonsTabsAndAddList},
+    {"TabStripNeverOverlapsAddList", TabStripNeverOverlapsAddList},
+    {"RowLayoutKeepsIndentControlsAndHitTestingInLockstep", RowLayoutKeepsIndentControlsAndHitTestingInLockstep},
+    {"EditIntentMapsKeyboardWithoutLeakingControlCharacters", EditIntentMapsKeyboardWithoutLeakingControlCharacters},
+    {"TitleAndTrayMenusDoNotExposeListManagementCommands", TitleAndTrayMenusDoNotExposeListManagementCommands},
+    {"ListTabMenuOwnsRenameAndDeletePolicy", ListTabMenuOwnsRenameAndDeletePolicy},
+    {"ThemeMenuBuildsStableCommandRangesAndCustomCap", ThemeMenuBuildsStableCommandRangesAndCustomCap},
+};
+
+} // namespace
+
+int main() {
+    return RunTests("gui_contract", kTests);
+}

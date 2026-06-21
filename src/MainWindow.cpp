@@ -1,5 +1,7 @@
 #include "MainWindow.h"
 #include "Autostart.h"
+#include "GeometryPolicy.h"
+#include "MenuModel.h"
 #include "Theme.h"
 #include "ThemeCatalog.h"
 #include "ThemeLoader.h"
@@ -28,18 +30,6 @@
 
 namespace {
 constexpr int kAppIconResourceId = 1; // resources/resource.rc embeds app.ico with ID 1.
-constexpr int kDefaultWindowW = 260;
-constexpr int kDefaultWindowH = 340;
-constexpr int kMinWindowW = 220;
-constexpr int kMinWindowH = 160;
-
-// 主题菜单命令分区（1000..1999；避免与挂载 / 语言命令冲突）
-constexpr UINT kCmdThemeFollowSystem = 1000;
-constexpr UINT kCmdThemeBuiltinBase  = 1100; // + 内置主题索引
-constexpr UINT kCmdThemeCustomBase   = 1300; // + 自定义主题索引
-constexpr UINT kCmdThemeManager      = 1900;
-constexpr UINT kCmdListRename        = 2000;
-constexpr UINT kCmdListDelete        = 2001;
 
 template <class T> void SafeRelease(T** p) {
     if (*p) { (*p)->Release(); *p = nullptr; }
@@ -1073,30 +1063,30 @@ UINT ShowPopupMenu(HWND owner, POINT pt, const std::vector<PopupMenuItem>& items
     return state.result;
 }
 
-// 构造标题栏皮肤菜单。
-void AppendThemeMenu(std::vector<PopupMenuItem>& items, Lang lang,
-                     const std::string& mode, const std::string& curId,
-                     const std::vector<Theme::ThemeVisual>& customs) {
-    items.push_back(PopupMenuItem{ 0, T(Str::ThemeHeader, lang), false, false, false, true, 0, true });
-    items.push_back(PopupMenuItem{ kCmdThemeFollowSystem, T(Str::ThemeFollowSystem, lang), false,
-                                   mode == "follow_system", false, true, 1 });
-    static const struct { const char* id; Str name; } kBuiltinItems[] = {
-        { "paper", Str::ThemePaper }, { "mint", Str::ThemeMint }, { "sky", Str::ThemeSky },
-        { "rose", Str::ThemeRose }, { "sand", Str::ThemeSand }, { "graphite", Str::ThemeGraphite },
-        { "ink", Str::ThemeInk }, { "contrast", Str::ThemeContrast }
-    };
-    for (UINT i = 0; i < 8; i++) {
-        bool cur = (mode != "follow_system") && (curId == kBuiltinItems[i].id);
-        items.push_back(PopupMenuItem{ kCmdThemeBuiltinBase + i, T(kBuiltinItems[i].name, lang),
-                                       false, cur, false, true, 1 });
+GuiMenu::MountMode ToMenuMountMode(MountMode mode) {
+    switch (mode) {
+    case MountMode::Desktop: return GuiMenu::MountMode::Desktop;
+    case MountMode::Capsule: return GuiMenu::MountMode::Capsule;
+    case MountMode::Normal:  return GuiMenu::MountMode::Normal;
     }
-    UINT shown = (UINT)customs.size(); if (shown > 8) shown = 8; // 超出 8 个在管理窗口看全部
-    for (UINT i = 0; i < shown; i++) {
-        bool cur = (mode == "custom") && (curId == customs[i].id);
-        std::wstring nm = (lang == Lang::Zh) ? customs[i].name.zh : customs[i].name.en;
-        items.push_back(PopupMenuItem{ kCmdThemeCustomBase + i, nm, false, cur, false, true, 1 });
-    }
-    items.push_back(PopupMenuItem{ kCmdThemeManager, T(Str::ThemeCustom, lang), false, false, false, true, 1 });
+    return GuiMenu::MountMode::Normal;
+}
+
+GuiMenu::CapsuleStyle ToMenuCapsuleStyle(CapsuleStyle style) {
+    return style == CapsuleStyle::Dot ? GuiMenu::CapsuleStyle::Dot : GuiMenu::CapsuleStyle::Slim;
+}
+
+PopupMenuItem ToPopupMenuItem(const GuiMenu::Item& item) {
+    return PopupMenuItem{ static_cast<UINT>(item.cmd), item.text, item.separator,
+                          item.checked, item.danger, item.enabled, item.indent, item.header };
+}
+
+std::vector<PopupMenuItem> ToPopupMenuItems(const std::vector<GuiMenu::Item>& modelItems) {
+    std::vector<PopupMenuItem> items;
+    items.reserve(modelItems.size());
+    for (const GuiMenu::Item& item : modelItems)
+        items.push_back(ToPopupMenuItem(item));
+    return items;
 }
 
 } // namespace
@@ -1123,10 +1113,10 @@ bool MainWindow::Create() {
     LoadResult loadResult = Store::Load(model_, geom_, ui_);
 
     // 校验持久化几何：尺寸合理且至少落在某个显示器上，否则回退默认位置（防离屏/零尺寸找不回）
-    int w = kDefaultWindowW, h = kDefaultWindowH;
+    int w = GuiGeometry::kDefaultWindowW, h = GuiGeometry::kDefaultWindowH;
     bool geomOk = false;
-    if (geom_.valid && geom_.w >= kMinWindowW && geom_.w <= 4000 &&
-        geom_.h >= kMinWindowH && geom_.h <= 4000) {
+    const float startupDpiScale = (float)GetDpiForSystem() / 96.0f;
+    if (geom_.valid && GuiGeometry::AcceptsLoadedGeometrySize(geom_.w, geom_.h, startupDpiScale)) {
         RECT wr{ geom_.x, geom_.y, geom_.x + geom_.w, geom_.y + geom_.h };
         if (MonitorFromRect(&wr, MONITOR_DEFAULTTONULL) != nullptr) {
             w = geom_.w; h = geom_.h;
@@ -1469,8 +1459,9 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_GETMINMAXINFO: {
         auto mmi = reinterpret_cast<MINMAXINFO*>(lp);
-        mmi->ptMinTrackSize.x = (LONG)S(kMinWindowW);
-        mmi->ptMinTrackSize.y = (LONG)S(kMinWindowH);
+        const GuiGeometry::Size minSize = GuiGeometry::MinimumTrackSize(dpiScale());
+        mmi->ptMinTrackSize.x = (LONG)minSize.w;
+        mmi->ptMinTrackSize.y = (LONG)minSize.h;
         return 0;
     }
 
@@ -1660,30 +1651,29 @@ void MainWindow::RefreshTrayIcon() {
 
 void MainWindow::HandleMenuCommand(UINT cmd) {
     switch (cmd) {
-        case 1:  Show();                              break;
-        case 2:  ToggleAutostart();                   break;
-        case 3:  ExitApp();                           break;
-        case 10: SetMountMode(MountMode::Normal);     break;
-        case 11: SetMountMode(MountMode::Desktop);    break;
-        case 30: SetCapsuleStyle(CapsuleStyle::Slim);
+        case GuiMenu::kCmdShow:        Show();                           break;
+        case GuiMenu::kCmdAutostart:   ToggleAutostart();                break;
+        case GuiMenu::kCmdExit:        ExitApp();                        break;
+        case GuiMenu::kCmdModeNormal:  SetMountMode(MountMode::Normal);  break;
+        case GuiMenu::kCmdModeDesktop: SetMountMode(MountMode::Desktop); break;
+        case GuiMenu::kCmdStyleSlim:
+                 SetCapsuleStyle(CapsuleStyle::Slim);
                  if (mountMode_ != MountMode::Capsule) SetMountMode(MountMode::Capsule); break;
-        case 31: SetCapsuleStyle(CapsuleStyle::Dot);
+        case GuiMenu::kCmdStyleDot:
+                 SetCapsuleStyle(CapsuleStyle::Dot);
                  if (mountMode_ != MountMode::Capsule) SetMountMode(MountMode::Capsule); break;
-        case 20: SetLanguage(lang_ == Lang::Zh ? Lang::En : Lang::Zh); break;
+        case GuiMenu::kCmdToggleLang:
+                 SetLanguage(lang_ == Lang::Zh ? Lang::En : Lang::Zh); break;
         default:
             // 主题命令分区（1000..1999）
-            if (cmd == kCmdThemeFollowSystem) {
+            if (cmd == GuiMenu::kCmdThemeFollowSystem) {
                 SetThemeMode("follow_system");
-            } else if (cmd == kCmdThemeManager) {
+            } else if (cmd == GuiMenu::kCmdThemeManager) {
                 ShowThemeManager();
-            } else if (cmd >= kCmdThemeBuiltinBase && cmd < kCmdThemeBuiltinBase + 100) {
-                static const char* kBuiltinIds[] = {
-                    "paper", "mint", "sky", "rose", "sand", "graphite", "ink", "contrast"
-                };
-                UINT idx = cmd - kCmdThemeBuiltinBase;
-                if (idx < 8) SetThemeId(kBuiltinIds[idx]);
-            } else if (cmd >= kCmdThemeCustomBase && cmd < kCmdThemeCustomBase + 200) {
-                UINT idx = cmd - kCmdThemeCustomBase;
+            } else if (const char* id = GuiMenu::BuiltInThemeIdForCommand(cmd)) {
+                SetThemeId(id);
+            } else if (cmd >= GuiMenu::kCmdThemeCustomBase && cmd < GuiMenu::kCmdThemeCustomBase + 200) {
+                UINT idx = cmd - GuiMenu::kCmdThemeCustomBase;
                 if (idx < customThemes_.size()) SetThemeId(customThemes_[idx].id);
             }
             break;
@@ -1693,21 +1683,16 @@ void MainWindow::HandleMenuCommand(UINT cmd) {
 void MainWindow::ShowTrayMenu() {
     const bool wasShrunk = capsuleShrunk(); // (R1-F001) 记录弹出前是否折叠
 
-    const bool inCapsule = mountMode_ == MountMode::Capsule;
-    std::vector<PopupMenuItem> items{
-        PopupMenuItem{ 1, T(Str::Show, lang_) },
-        PopupMenuItem{ 0, L"", true },
-        PopupMenuItem{ 10, T(Str::ModeNormal, lang_), false, mountMode_ == MountMode::Normal },
-        PopupMenuItem{ 11, T(Str::ModeDesktop, lang_), false, mountMode_ == MountMode::Desktop },
-        PopupMenuItem{ 0, T(Str::ModeCapsule, lang_), false, false, false, false },
-        PopupMenuItem{ 30, T(Str::StyleSlim, lang_), false, inCapsule && capsuleStyle_ == CapsuleStyle::Slim, false, true, 1 },
-        PopupMenuItem{ 31, T(Str::StyleDot, lang_), false, inCapsule && capsuleStyle_ == CapsuleStyle::Dot, false, true, 1 },
-        PopupMenuItem{ 0, L"", true },
-        PopupMenuItem{ 20, T(Str::ToggleLang, lang_) },
-        PopupMenuItem{ 2, T(Str::Autostart, lang_), false, Autostart::IsEnabled() },
-        PopupMenuItem{ 0, L"", true },
-        PopupMenuItem{ 3, T(Str::Exit, lang_), false, false, true },
-    };
+    GuiMenu::State state;
+    state.lang = lang_;
+    state.autostart = Autostart::IsEnabled();
+    state.mountMode = ToMenuMountMode(mountMode_);
+    state.capsuleStyle = ToMenuCapsuleStyle(capsuleStyle_);
+    state.themeMode = ui_.themeMode;
+    state.currentThemeId = theme_.id;
+    state.customThemes = &customThemes_;
+    state.listCount = model_.ListCount();
+    std::vector<PopupMenuItem> items = ToPopupMenuItems(GuiMenu::BuildTrayMenu(state));
 
     POINT pt;
     GetCursorPos(&pt);
@@ -1715,24 +1700,21 @@ void MainWindow::ShowTrayMenu() {
     UINT cmd = ShowPopupMenu(hwnd_, pt, items, false, theme_, d2dFactory_, dwrite_);
     menuOpen_ = false;                 // 必须在 HandleMenuCommand 前清，且无论返回值
     HandleMenuCommand(cmd);
-    // (R1-F001) 补判收缩，排除：退出(3)；以及刚由 Show(1) 把折叠胶囊展开的情形（否则光标在窗外会被立刻收回）
-    if (cmd != 3 && !(cmd == 1 && wasShrunk)) MaybeCollapseCapsule();
+    // (R1-F001) 补判收缩，排除退出；以及刚由 Show 把折叠胶囊展开的情形
+    if (cmd != GuiMenu::kCmdExit && !(cmd == GuiMenu::kCmdShow && wasShrunk)) MaybeCollapseCapsule();
 }
 
 void MainWindow::ShowTitleMenu() {
-    const bool inCapsule = mountMode_ == MountMode::Capsule;
-    std::vector<PopupMenuItem> items{
-        PopupMenuItem{ 10, T(Str::ModeNormal, lang_), false, mountMode_ == MountMode::Normal },
-        PopupMenuItem{ 11, T(Str::ModeDesktop, lang_), false, mountMode_ == MountMode::Desktop },
-        PopupMenuItem{ 0, T(Str::ModeCapsule, lang_), false, false, false, false },
-        PopupMenuItem{ 30, T(Str::StyleSlim, lang_), false, inCapsule && capsuleStyle_ == CapsuleStyle::Slim, false, true, 1 },
-        PopupMenuItem{ 31, T(Str::StyleDot, lang_), false, inCapsule && capsuleStyle_ == CapsuleStyle::Dot, false, true, 1 },
-        PopupMenuItem{ 0, L"", true },
-        PopupMenuItem{ 20, T(Str::ToggleLang, lang_) },
-        PopupMenuItem{ 2, T(Str::Autostart, lang_), false, Autostart::IsEnabled() },
-        PopupMenuItem{ 0, L"", true },
-        PopupMenuItem{ 3, T(Str::Exit, lang_), false, false, true },
-    };
+    GuiMenu::State state;
+    state.lang = lang_;
+    state.autostart = Autostart::IsEnabled();
+    state.mountMode = ToMenuMountMode(mountMode_);
+    state.capsuleStyle = ToMenuCapsuleStyle(capsuleStyle_);
+    state.themeMode = ui_.themeMode;
+    state.currentThemeId = theme_.id;
+    state.customThemes = &customThemes_;
+    state.listCount = model_.ListCount();
+    std::vector<PopupMenuItem> items = ToPopupMenuItems(GuiMenu::BuildTitleMenu(state));
 
     RECT rc{};
     GetClientRect(hwnd_, &rc);
@@ -1742,12 +1724,20 @@ void MainWindow::ShowTitleMenu() {
     UINT cmd = ShowPopupMenu(hwnd_, pt, items, true, theme_, d2dFactory_, dwrite_);
     menuOpen_ = false;                 // 必须在 HandleMenuCommand 前清，且无论返回值
     HandleMenuCommand(cmd);
-    if (cmd != 3) MaybeCollapseCapsule(); // (R1-F001) 非退出：按真实光标位置补判（cmd==3 已 DestroyWindow）
+    if (cmd != GuiMenu::kCmdExit) MaybeCollapseCapsule(); // 非退出：按真实光标位置补判
 }
 
 void MainWindow::ShowThemeMenu() {
-    std::vector<PopupMenuItem> items;
-    AppendThemeMenu(items, lang_, ui_.themeMode, theme_.id, customThemes_);
+    GuiMenu::State state;
+    state.lang = lang_;
+    state.autostart = Autostart::IsEnabled();
+    state.mountMode = ToMenuMountMode(mountMode_);
+    state.capsuleStyle = ToMenuCapsuleStyle(capsuleStyle_);
+    state.themeMode = ui_.themeMode;
+    state.currentThemeId = theme_.id;
+    state.customThemes = &customThemes_;
+    state.listCount = model_.ListCount();
+    std::vector<PopupMenuItem> items = ToPopupMenuItems(GuiMenu::BuildThemeMenu(state));
 
     POINT pt{ (LONG)themeRect_.right, (LONG)themeRect_.bottom };
     ClientToScreen(hwnd_, &pt);
@@ -1755,17 +1745,13 @@ void MainWindow::ShowThemeMenu() {
     UINT cmd = ShowPopupMenu(hwnd_, pt, items, true, theme_, d2dFactory_, dwrite_);
     menuOpen_ = false;
     HandleMenuCommand(cmd);
-    if (cmd != 3) MaybeCollapseCapsule();
+    if (cmd != GuiMenu::kCmdExit) MaybeCollapseCapsule();
 }
 
 void MainWindow::ShowListTabMenu(int index, float x, float y) {
     if (!model_.ListAt(index)) return;
-    std::vector<PopupMenuItem> items{
-        PopupMenuItem{ kCmdListRename, T(Str::ListRename, lang_) },
-        PopupMenuItem{ 0, L"", true },
-        PopupMenuItem{ kCmdListDelete, T(Str::ListDelete, lang_), false, false,
-                       true, model_.ListCount() > 1 },
-    };
+    std::vector<PopupMenuItem> items =
+        ToPopupMenuItems(GuiMenu::BuildListTabMenu(lang_, model_.ListCount()));
 
     POINT pt{ (LONG)x, (LONG)y };
     ClientToScreen(hwnd_, &pt);
@@ -1773,8 +1759,8 @@ void MainWindow::ShowListTabMenu(int index, float x, float y) {
     UINT cmd = ShowPopupMenu(hwnd_, pt, items, false, theme_, d2dFactory_, dwrite_);
     menuOpen_ = false;
 
-    if (cmd == kCmdListRename) RenameList(index);
-    else if (cmd == kCmdListDelete) DeleteList(index);
+    if (cmd == GuiMenu::kCmdListRename) RenameList(index);
+    else if (cmd == GuiMenu::kCmdListDelete) DeleteList(index);
     MaybeCollapseCapsule();
 }
 
@@ -1857,7 +1843,7 @@ void MainWindow::DeleteList(int index) {
 void MainWindow::SetMountMode(MountMode m) {
     if (m == mountMode_) return;
     if (editing()) CommitEdit(false);
-    if (!capsuleShrunk()) CaptureVisibleGeometry();
+    if (GuiGeometry::ShouldCaptureBeforeModeSwitch(capsuleShrunk())) CaptureVisibleGeometry();
 
     mountMode_ = m;
     ui_.mountMode = (m == MountMode::Desktop) ? "desktop"
@@ -1914,11 +1900,11 @@ RECT MainWindow::ExpandedTargetRect() const {
     if (DockMonitorInfo(mi)) wa = mi.rcWork;
     else SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
 
-    int w = geom_.valid ? geom_.w : 300;
-    int h = geom_.valid ? geom_.h : 380;
     int workW = wa.right - wa.left, workH = wa.bottom - wa.top;
-    if (workW > 0 && w > workW) w = workW;
-    if (workH > 0 && h > workH) h = workH;
+    const GuiGeometry::Size expanded =
+        GuiGeometry::ExpandedSize(geom_.valid, geom_.w, geom_.h, workW, workH);
+    int w = expanded.w;
+    int h = expanded.h;
     int centerY = wa.top + (int)(CapsuleDockT() * workH + 0.5);
     int y = ClampInt(centerY - h / 2, wa.top, wa.bottom - h);
     int x = (CapsuleDockEdge() == DockEdge::Left) ? wa.left : wa.right - w;
@@ -2112,12 +2098,23 @@ void MainWindow::CaptureVisibleGeometry() {
     if (!GetWindowRect(hwnd_, &rc)) return;
     int w = rc.right - rc.left;
     int h = rc.bottom - rc.top;
-    if (w < (int)S(220) || h < (int)S(160)) return;
 
-    if (mountMode_ == MountMode::Capsule) {
-        if (!capsuleExpanded_ || animActive_) return;
+    GuiGeometry::CaptureInput input;
+    input.w = w;
+    input.h = h;
+    input.dpiScale = dpiScale();
+    input.mountMode = mountMode_ == MountMode::Capsule ? GuiGeometry::MountMode::Capsule
+                    : mountMode_ == MountMode::Desktop ? GuiGeometry::MountMode::Desktop
+                    : GuiGeometry::MountMode::Normal;
+    input.capsuleExpanded = capsuleExpanded_;
+    input.animActive = animActive_;
+    const GuiGeometry::CaptureDecision decision = GuiGeometry::DecideCapture(input);
+    if (!decision.accept) return;
+
+    if (decision.captureDock) {
         CaptureCapsuleDockFromRect(rc);
-    } else {
+    }
+    if (decision.capturePosition) {
         geom_.x = rc.left;
         geom_.y = rc.top;
     }
@@ -2268,12 +2265,23 @@ void MainWindow::CaptureGeometry() {
     if (!GetWindowRect(hwnd_, &rc)) return;
     int w = rc.right - rc.left;
     int h = rc.bottom - rc.top;
-    if (w < (int)S(220) || h < (int)S(160)) return;
 
-    if (mountMode_ == MountMode::Capsule) {
-        if (!capsuleExpanded_ || animActive_) return;
+    GuiGeometry::CaptureInput input;
+    input.w = w;
+    input.h = h;
+    input.dpiScale = dpiScale();
+    input.mountMode = mountMode_ == MountMode::Capsule ? GuiGeometry::MountMode::Capsule
+                    : mountMode_ == MountMode::Desktop ? GuiGeometry::MountMode::Desktop
+                    : GuiGeometry::MountMode::Normal;
+    input.capsuleExpanded = capsuleExpanded_;
+    input.animActive = animActive_;
+    const GuiGeometry::CaptureDecision decision = GuiGeometry::DecideCapture(input);
+    if (!decision.accept) return;
+
+    if (decision.captureDock) {
         CaptureCapsuleDockFromRect(rc);
-    } else {
+    }
+    if (decision.capturePosition) {
         geom_.x = rc.left;
         geom_.y = rc.top;
     }

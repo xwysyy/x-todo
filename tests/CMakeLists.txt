@@ -51,3 +51,13 @@ add_xtodo_test(xtodo_i18n_tests
     i18n_tests.cpp
     ../src/I18n.cpp
 )
+
+add_xtodo_test(xtodo_gui_contract_tests
+    gui_contract_tests.cpp
+    ../src/EditIntent.cpp
+    ../src/GeometryPolicy.cpp
+    ../src/MenuModel.cpp
+    ../src/ViewLayout.cpp
+    ../src/WindowHitTest.cpp
+    ../src/I18n.cpp
+)
