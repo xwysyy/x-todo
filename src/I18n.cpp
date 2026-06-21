@@ -15,6 +15,8 @@ const wchar_t* T(Str key, Lang lang) {
         case Str::Autostart:     return zh ? L"开机自启"        : L"Start with Windows";
         case Str::ToggleLang:    return zh ? L"English"         : L"中文"; // 显示可切换到的目标语言
         case Str::Exit:          return zh ? L"退出"            : L"Exit";
+        case Str::Calendar:      return zh ? L"日历"            : L"Calendar";
+        case Str::AllDay:        return zh ? L"全天"            : L"All-day";
         case Str::EmptyListTitle:return zh ? L"当前列表为空"    : L"This list is empty";
         case Str::EmptyActivePrompt:
                                   return zh ? L"点击创建第一条" : L"Click to create the first item";

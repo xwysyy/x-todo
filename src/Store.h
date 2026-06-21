@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include "CalendarModel.h"
 #include "TodoModel.h"
 
 struct WindowGeometry {
@@ -22,6 +23,8 @@ struct UiState {
     std::string capsuleDockEdge = "right"; // left | right
     double      capsuleDockT    = 0.5;     // 0..1，沿吸附边的归一化纵向位置
     std::string capsuleMonitor  = "";      // 显示器 szDevice（UTF-8），丢失时回退就近
+    std::string activeView      = "list";  // list | calendar
+    std::string calendarDay     = "";      // YYYY-MM-DD；空表示启动时使用本地日期
 };
 
 // 加载结果：区分"文件不存在"（可安全空启动）与"存在但读失败"（须防止覆盖丢失）。
@@ -31,7 +34,8 @@ enum class LoadResult { Missing, Loaded, Failed };
 namespace Store {
     std::wstring DataFilePath();
     // Missing=无文件；Loaded=成功；Failed=文件存在但读取失败（已自动备份为 .corrupt.bak）。
-    LoadResult Load(TodoModel& model, WindowGeometry& geom, UiState& ui);
+    LoadResult Load(TodoModel& model, CalendarModel& calendar, WindowGeometry& geom, UiState& ui);
     // 原子写（临时文件 + 替换），成功返回 true。
-    bool Save(const TodoModel& model, const WindowGeometry& geom, const UiState& ui);
+    bool Save(const TodoModel& model, const CalendarModel& calendar,
+              const WindowGeometry& geom, const UiState& ui);
 }

@@ -1110,7 +1110,7 @@ bool MainWindow::RegisterWindowClass() {
 bool MainWindow::Create() {
     if (!RegisterWindowClass()) return false;
 
-    LoadResult loadResult = Store::Load(model_, geom_, ui_);
+    LoadResult loadResult = Store::Load(model_, calendar_, geom_, ui_);
 
     // 校验持久化几何：尺寸合理且至少落在某个显示器上，否则回退默认位置（防离屏/零尺寸找不回）
     int w = GuiGeometry::kDefaultWindowW, h = GuiGeometry::kDefaultWindowH;
@@ -1154,6 +1154,8 @@ bool MainWindow::Create() {
     lang_ = ui_.lang == "zh" ? Lang::Zh
           : ui_.lang == "en" ? Lang::En
           : SystemDefaultLang();
+    activeView_ = ui_.activeView == "calendar" ? MainView::Calendar : MainView::Lists;
+    EnsureCalendarDay();
     capsuleStyle_ = ui_.capsuleStyle == "dot" ? CapsuleStyle::Dot : CapsuleStyle::Slim;
     mountMode_ = ui_.mountMode == "desktop" ? MountMode::Desktop
                : ui_.mountMode == "capsule" ? MountMode::Capsule
@@ -1214,6 +1216,12 @@ void MainWindow::ApplyResolvedTheme(bool persist) {
     if (editBg_) { DeleteObject(editBg_); editBg_ = nullptr; }
     if (edit_ && IsWindow(edit_) && IsWindowVisible(edit_))
         InvalidateRect(edit_, nullptr, TRUE);
+    if (calendarTitleEdit_ && IsWindow(calendarTitleEdit_) && IsWindowVisible(calendarTitleEdit_))
+        InvalidateRect(calendarTitleEdit_, nullptr, TRUE);
+    if (calendarStartEdit_ && IsWindow(calendarStartEdit_) && IsWindowVisible(calendarStartEdit_))
+        InvalidateRect(calendarStartEdit_, nullptr, TRUE);
+    if (calendarEndEdit_ && IsWindow(calendarEndEdit_) && IsWindowVisible(calendarEndEdit_))
+        InvalidateRect(calendarEndEdit_, nullptr, TRUE);
 
     UpdateLayeredState();        // Slim 胶囊透明度使用新主题 slimAlpha
     RefreshTrayIcon();           // 保持托盘使用固定应用图标
@@ -1392,6 +1400,7 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
             SendMessageW(edit_, WM_SETFONT, (WPARAM)editFont_, TRUE);
             LayoutEditBox();
         }
+        if (calendarEditing()) LayoutCalendarEditControls();
         UpdateLayeredState();
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
@@ -1414,6 +1423,13 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_RBUTTONUP:
         OnRButtonUp((float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp));
         return 0;
+
+    case WM_COMMAND:
+        if ((HWND)lp == calendarTitleEdit_ || (HWND)lp == calendarStartEdit_ || (HWND)lp == calendarEndEdit_) {
+            if (HIWORD(wp) == EN_CHANGE) OnCalendarEditChanged((HWND)lp);
+            return 0;
+        }
+        break;
 
     case WM_MOUSEMOVE: {
         TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd_, 0 };
@@ -1439,7 +1455,8 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
             UpdateLayeredState();
             InvalidateRect(hwnd_, nullptr, FALSE);
         }
-        if (mountMode_ == MountMode::Capsule && capsuleExpanded_ && !animActive_ && !editing() && !menuOpen_)
+        if (mountMode_ == MountMode::Capsule && capsuleExpanded_ && !animActive_ &&
+            !editing() && !calendarEditing() && !menuOpen_)
             SetTimer(hwnd_, kCollapseTimerId, kCollapseDelayMs, nullptr); // 离开不立即收：宽限期内移回即取消
         return 0;
 
@@ -1451,6 +1468,7 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
         if ((HWND)lp != hwnd_) {
             if (capsulePressing_) CancelCapsulePress();
             if (dragging_) { dragging_ = false; dragFrom_ = dragInsert_ = -1; InvalidateRect(hwnd_, nullptr, FALSE); }
+            CancelCalendarCapture();
         }
         return 0;
 
@@ -1488,7 +1506,8 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
             OnAnimTick();
         } else if (wp == kCollapseTimerId) {
             KillTimer(hwnd_, kCollapseTimerId);
-            if (mountMode_ == MountMode::Capsule && capsuleExpanded_ && !animActive_ && !editing() && !menuOpen_) {
+            if (mountMode_ == MountMode::Capsule && capsuleExpanded_ && !animActive_ &&
+                !editing() && !calendarEditing() && !menuOpen_) {
                 POINT cur{}; GetCursorPos(&cur);
                 RECT wr{}; GetWindowRect(hwnd_, &wr);
                 bool lbtn = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
@@ -1588,6 +1607,7 @@ void MainWindow::Resize(UINT w, UINT h) {
     RebuildLayout();
     ClampScroll();
     if (editing()) LayoutEditBox();
+    if (calendarEditing()) LayoutCalendarEditControls();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
@@ -1774,26 +1794,34 @@ void MainWindow::SetLanguage(Lang lang) {
 }
 
 void MainWindow::SwitchList(int index) {
-    if (index == model_.CurrentListIndex()) return;
+    if (!model_.ListAt(index)) return;
     if (editing()) CommitEdit(false);
-    if (!model_.SetCurrentListIndex(index)) return;
+    if (calendarEditing()) EndCalendarEdit(true);
+    const bool changedList = index != model_.CurrentListIndex();
+    const bool changedView = activeView_ != MainView::Lists;
+    activeView_ = MainView::Lists;
+    ui_.activeView = "list";
+    if (changedList && !model_.SetCurrentListIndex(index)) return;
     scroll_ = 0.0f;
     hoverRow_ = -1;
     dragging_ = false;
     dragFrom_ = dragInsert_ = -1;
     RebuildLayout();
     ClampScroll();
-    ScheduleSave();
+    if (changedList || changedView) ScheduleSave();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 void MainWindow::CreateList() {
     if (editing()) CommitEdit(false);
+    if (calendarEditing()) EndCalendarEdit(true);
     std::wstring title = T(Str::ListDefault, lang_);
     if (model_.ListCount() > 0)
         title += L" " + std::to_wstring(model_.ListCount() + 1);
     if (!PromptText(T(Str::ListNamePrompt, lang_), title)) return;
 
+    activeView_ = MainView::Lists;
+    ui_.activeView = "list";
     model_.AddList(title);
     scroll_ = 0.0f;
     hoverRow_ = -1;
@@ -1806,6 +1834,7 @@ void MainWindow::RenameList(int index) {
     const TodoList* list = model_.ListAt(index);
     if (!list) return;
     if (editing()) CommitEdit(false);
+    if (calendarEditing()) EndCalendarEdit(true);
 
     std::wstring title = list->title;
     if (!PromptText(T(Str::ListNamePrompt, lang_), title)) return;
@@ -1820,6 +1849,7 @@ void MainWindow::DeleteList(int index) {
     if (model_.ListCount() <= 1) return;
     if (!model_.ListAt(index)) return;
     if (editing()) CommitEdit(false);
+    if (calendarEditing()) EndCalendarEdit(true);
     if (!Confirm(Str::ListDeleteMsg, MB_ICONWARNING)) return;
 
     const bool deletingCurrent = index == model_.CurrentListIndex();
@@ -2229,6 +2259,7 @@ void MainWindow::ClearCompletedConfirm() {
 
 void MainWindow::HideToTray() {
     if (editing()) CommitEdit(false);
+    if (calendarEditing()) EndCalendarEdit(true);
     if (savePending_) { // 收起前把待保存改动立即落盘
         KillTimer(hwnd_, kSaveTimerId);
         savePending_ = false;
@@ -2244,10 +2275,14 @@ void MainWindow::HideToTray() {
 
 void MainWindow::ExitApp() {
     if (editing()) CommitEdit(false); // 退出前把编辑中的文本落入 model，避免丢失
+    if (calendarEditing()) EndCalendarEdit(true);
     SaveNow();
     RemoveTrayIcon();
     if (editFont_) { DeleteObject(editFont_); editFont_ = nullptr; }
     if (editBg_)   { DeleteObject(editBg_);   editBg_   = nullptr; }
+    if (calendarTitleEdit_) { DestroyWindow(calendarTitleEdit_); calendarTitleEdit_ = nullptr; }
+    if (calendarStartEdit_) { DestroyWindow(calendarStartEdit_); calendarStartEdit_ = nullptr; }
+    if (calendarEndEdit_)   { DestroyWindow(calendarEndEdit_);   calendarEndEdit_ = nullptr; }
     DiscardDeviceResources();
     SafeRelease(&dwrite_);
     SafeRelease(&d2dFactory_);
@@ -2263,7 +2298,7 @@ void MainWindow::ScheduleSave() {
 
 void MainWindow::SaveNow() {
     CaptureGeometry();
-    if (!Store::Save(model_, geom_, ui_)) {
+    if (!Store::Save(model_, calendar_, geom_, ui_)) {
         // 保存失败（磁盘满 / 占用 / 权限）：保留待存标记并延迟重试，不静默丢改动
         savePending_ = true;
         SetTimer(hwnd_, kSaveTimerId, 3000, nullptr);

@@ -9,10 +9,10 @@ using namespace xtodo_test;
 
 namespace {
 
-const Str kAllStrings[] = {
-    Str::Show, Str::ModeNormal, Str::ModeDesktop, Str::ModeCapsule,
-    Str::StyleSlim, Str::StyleDot, Str::Autostart, Str::ToggleLang,
-    Str::Exit, Str::EmptyListTitle, Str::EmptyActivePrompt, Str::ListNamePrompt,
+    const Str kAllStrings[] = {
+        Str::Show, Str::ModeNormal, Str::ModeDesktop, Str::ModeCapsule,
+        Str::StyleSlim, Str::StyleDot, Str::Autostart, Str::ToggleLang,
+    Str::Exit, Str::Calendar, Str::AllDay, Str::EmptyListTitle, Str::EmptyActivePrompt, Str::ListNamePrompt,
     Str::ListDefault, Str::ListRename, Str::ListDelete,
     Str::ListDeleteMsg, Str::Completed, Str::Clear, Str::DeleteItemMsg,
     Str::ClearAllMsg, Str::ConfirmOk, Str::ConfirmCancel, Str::LoadFailedMsg,

@@ -20,6 +20,8 @@ void ExpectDefaultUi(const UiState& ui) {
     EXPECT_EQ(ui.capsuleDockEdge, std::string("right"));
     EXPECT_NEAR(ui.capsuleDockT, 0.5, 0.000001);
     EXPECT_EQ(ui.capsuleMonitor, std::string(""));
+    EXPECT_EQ(ui.activeView, std::string("list"));
+    EXPECT_EQ(ui.calendarDay, std::string(""));
 }
 
 void EscapeRoundTripKeepsOneLogicalLinePerItem() {
@@ -31,7 +33,8 @@ void EscapeRoundTripKeepsOneLogicalLinePerItem() {
 }
 
 void SerializeRoundTripPreservesV4MultiListModelUiAndGeometry() {
-    TodoModel model;
+        TodoModel model;
+    CalendarModel calendar;
     EXPECT_TRUE(model.RenameList(0, L"Inbox\tMain"));
     model.AddActive(L"Parent", 0);
     model.AddActive(L"Child with slash\\and tab\t", 1);
@@ -62,17 +65,28 @@ void SerializeRoundTripPreservesV4MultiListModelUiAndGeometry() {
     ui.capsuleDockEdge = "left";
     ui.capsuleDockT = 0.1234567;
     ui.capsuleMonitor = "\\\\.\\DISPLAY1";
+    ui.activeView = "calendar";
+    ui.calendarDay = "2026-06-22";
 
-    const std::wstring text = StoreFormat::SerializeText(model, geom, ui);
+    const int blockA = calendar.AddBlock("2026-06-22", 9 * 60 + 7, 10 * 60 + 3, L"Plan\tA");
+    const int blockB = calendar.AddBlock("2026-06-23", 18 * 60, 19 * 60 + 30, L"Tomorrow\\B");
+    EXPECT_TRUE(blockA > 0);
+    EXPECT_TRUE(blockB > blockA);
+
+    const std::wstring text = StoreFormat::SerializeText(model, calendar, geom, ui);
     EXPECT_TRUE(text.find(L"XTODO v4\n") == 0);
     EXPECT_TRUE(text.find(L"Child with slash\\\\and tab\\t") != std::wstring::npos);
     EXPECT_TRUE(text.find(L"Work\\nList") != std::wstring::npos);
     EXPECT_TRUE(text.find(L"ui current_list=list-1") != std::wstring::npos);
+    EXPECT_TRUE(text.find(L"ui active_view=calendar") != std::wstring::npos);
+    EXPECT_TRUE(text.find(L"ui calendar_day=2026-06-22") != std::wstring::npos);
+    EXPECT_TRUE(text.find(L"calendar ") != std::wstring::npos);
 
     TodoModel loaded;
+    CalendarModel loadedCalendar;
     WindowGeometry loadedGeom;
     UiState loadedUi;
-    EXPECT_TRUE(StoreFormat::ParseText(text, loaded, loadedGeom, loadedUi));
+    EXPECT_TRUE(StoreFormat::ParseText(text, loaded, loadedCalendar, loadedGeom, loadedUi));
 
     EXPECT_EQ(loadedGeom.x, -12);
     EXPECT_EQ(loadedGeom.y, 34);
@@ -91,6 +105,8 @@ void SerializeRoundTripPreservesV4MultiListModelUiAndGeometry() {
     EXPECT_EQ(loadedUi.capsuleDockEdge, std::string("left"));
     EXPECT_NEAR(loadedUi.capsuleDockT, 0.123457, 0.000001);
     EXPECT_EQ(loadedUi.capsuleMonitor, std::string("\\\\.\\DISPLAY1"));
+    EXPECT_EQ(loadedUi.activeView, std::string("calendar"));
+    EXPECT_EQ(loadedUi.calendarDay, std::string("2026-06-22"));
 
     EXPECT_EQ(loaded.ListCount(), 2);
     EXPECT_EQ(loaded.CurrentListIndex(), 1);
@@ -102,6 +118,15 @@ void SerializeRoundTripPreservesV4MultiListModelUiAndGeometry() {
     ExpectDones(loaded, {false, false, true});
     ExpectCollapsed(loaded, {true, false, false});
     AssertInvariants(loaded);
+
+    const auto today = loadedCalendar.BlocksForDay("2026-06-22");
+    const auto tomorrow = loadedCalendar.BlocksForDay("2026-06-23");
+    EXPECT_EQ(today.size(), static_cast<size_t>(1));
+    EXPECT_EQ(tomorrow.size(), static_cast<size_t>(1));
+    EXPECT_EQ(today[0]->startMinute, 9 * 60 + 7);
+    EXPECT_EQ(today[0]->endMinute, 10 * 60 + 3);
+    EXPECT_EQ(today[0]->title, std::wstring(L"Plan\tA"));
+    EXPECT_EQ(tomorrow[0]->title, std::wstring(L"Tomorrow\\B"));
 }
 
 void LegacyV1SingleListLoadsEscapedItemsAndCompletedExpanded() {
@@ -112,9 +137,10 @@ void LegacyV1SingleListLoadsEscapedItemsAndCompletedExpanded() {
         L"ui completed_expanded=1\n";
 
     TodoModel model;
+    CalendarModel calendar;
     WindowGeometry geom;
     UiState ui;
-    EXPECT_TRUE(StoreFormat::ParseText(text, model, geom, ui));
+    EXPECT_TRUE(StoreFormat::ParseText(text, model, calendar, geom, ui));
 
     EXPECT_EQ(model.ListCount(), 1);
     EXPECT_EQ(model.CurrentList().id, std::string("inbox"));
@@ -131,10 +157,11 @@ void V2V3AndV4MigrationsNormalizeLevelsAndCollapsedFlags() {
             L"XTODO v2\n"
             L"item 0 first\n"
             L"item 1 done\n";
-        TodoModel model;
+    TodoModel model;
+        CalendarModel calendar;
         WindowGeometry geom;
         UiState ui;
-        EXPECT_TRUE(StoreFormat::ParseText(text, model, geom, ui));
+        EXPECT_TRUE(StoreFormat::ParseText(text, model, calendar, geom, ui));
         ExpectTexts(model, {L"first", L"done"});
         ExpectLevels(model, {0, 0});
         ExpectDones(model, {false, true});
@@ -148,9 +175,10 @@ void V2V3AndV4MigrationsNormalizeLevelsAndCollapsedFlags() {
             L"item 0 99 child\n"
             L"item 1 3 done child\n";
         TodoModel model;
+        CalendarModel calendar;
         WindowGeometry geom;
         UiState ui;
-        EXPECT_TRUE(StoreFormat::ParseText(text, model, geom, ui));
+        EXPECT_TRUE(StoreFormat::ParseText(text, model, calendar, geom, ui));
         ExpectTexts(model, {L"root", L"child", L"done child"});
         ExpectLevels(model, {0, 1, 0});
         ExpectDones(model, {false, false, true});
@@ -165,9 +193,10 @@ void V2V3AndV4MigrationsNormalizeLevelsAndCollapsedFlags() {
             L"item 1 0 1 done parent\n"
             L"item 1 1 0 done child\n";
         TodoModel model;
+        CalendarModel calendar;
         WindowGeometry geom;
         UiState ui;
-        EXPECT_TRUE(StoreFormat::ParseText(text, model, geom, ui));
+        EXPECT_TRUE(StoreFormat::ParseText(text, model, calendar, geom, ui));
         ExpectTexts(model, {L"parent", L"child leaf", L"done parent", L"done child"});
         ExpectCollapsed(model, {true, false, true, false});
         AssertInvariants(model);
@@ -190,13 +219,18 @@ void UiParsingUsesExactKeysAndValidatesValues() {
         L"ui capsule_dock_edge=left\n"
         L"ui capsule_dock_edge=top\n"
         L"ui capsule_dock_t=2.5\n"
+        L"ui active_view=calendar\n"
+        L"ui active_view=popup\n"
+        L"ui calendar_day=2026-06-22\n"
+        L"ui calendar_day=bad\n"
         L"ui unknown=value\n"
         L"list inbox 0 Inbox\n";
 
     TodoModel model;
+    CalendarModel calendar;
     WindowGeometry geom;
     UiState ui;
-    EXPECT_TRUE(StoreFormat::ParseText(text, model, geom, ui));
+    EXPECT_TRUE(StoreFormat::ParseText(text, model, calendar, geom, ui));
 
     EXPECT_EQ(ui.themeId, std::string("custom.current"));
     EXPECT_EQ(ui.lightThemeId, std::string("custom.light"));
@@ -206,6 +240,8 @@ void UiParsingUsesExactKeysAndValidatesValues() {
     EXPECT_EQ(ui.capsuleStyle, std::string("dot"));
     EXPECT_EQ(ui.capsuleDockEdge, std::string("left"));
     EXPECT_NEAR(ui.capsuleDockT, 1.0, 0.000001);
+    EXPECT_EQ(ui.activeView, std::string("calendar"));
+    EXPECT_EQ(ui.calendarDay, std::string("2026-06-22"));
     AssertInvariants(model);
 }
 
@@ -221,9 +257,10 @@ void MissingCurrentListFallsBackAndUiBoundsRemainStable() {
         L"item 1 0 0 Done work\n";
 
     TodoModel model;
+    CalendarModel calendar;
     WindowGeometry geom;
     UiState ui;
-    EXPECT_TRUE(StoreFormat::ParseText(text, model, geom, ui));
+    EXPECT_TRUE(StoreFormat::ParseText(text, model, calendar, geom, ui));
 
     EXPECT_EQ(model.ListCount(), 2);
     EXPECT_EQ(model.CurrentListIndex(), 0);
@@ -236,15 +273,41 @@ void MissingCurrentListFallsBackAndUiBoundsRemainStable() {
 
 void EmptyTextLeavesSafeDefaults() {
     TodoModel model;
+    CalendarModel calendar;
     WindowGeometry geom;
     UiState ui;
-    EXPECT_TRUE(StoreFormat::ParseText(L"", model, geom, ui));
+    EXPECT_TRUE(StoreFormat::ParseText(L"", model, calendar, geom, ui));
 
     EXPECT_EQ(model.ListCount(), 1);
     EXPECT_EQ(model.CurrentList().id, std::string("inbox"));
     EXPECT_EQ(model.Count(), 0);
     EXPECT_FALSE(geom.valid);
     ExpectDefaultUi(ui);
+    AssertInvariants(model);
+}
+
+void CalendarLinesIgnoreInvalidRowsAndNormalizeDuplicateIds() {
+    const std::wstring text =
+        L"XTODO v4\n"
+        L"calendar 7 2026-06-22 60 120 first\n"
+        L"calendar 7 2026-06-22 130 131 duplicate id\n"
+        L"calendar 8 bad-day 60 120 ignored\n"
+        L"calendar 9 2026-06-22 200 200 normalized\n"
+        L"list inbox 0 Inbox\n";
+
+    TodoModel model;
+    CalendarModel calendar;
+    WindowGeometry geom;
+    UiState ui;
+    EXPECT_TRUE(StoreFormat::ParseText(text, model, calendar, geom, ui));
+
+    const auto blocks = calendar.BlocksForDay("2026-06-22");
+    EXPECT_EQ(blocks.size(), static_cast<size_t>(3));
+    EXPECT_EQ(blocks[0]->id, 7);
+    EXPECT_EQ(blocks[0]->title, std::wstring(L"first"));
+    EXPECT_TRUE(blocks[1]->id != 7);
+    EXPECT_EQ(blocks[2]->startMinute, 200);
+    EXPECT_EQ(blocks[2]->endMinute, 201);
     AssertInvariants(model);
 }
 
@@ -256,6 +319,7 @@ const TestCase kTests[] = {
     {"UiParsingUsesExactKeysAndValidatesValues", UiParsingUsesExactKeysAndValidatesValues},
     {"MissingCurrentListFallsBackAndUiBoundsRemainStable", MissingCurrentListFallsBackAndUiBoundsRemainStable},
     {"EmptyTextLeavesSafeDefaults", EmptyTextLeavesSafeDefaults},
+    {"CalendarLinesIgnoreInvalidRowsAndNormalizeDuplicateIds", CalendarLinesIgnoreInvalidRowsAndNormalizeDuplicateIds},
 };
 
 } // namespace

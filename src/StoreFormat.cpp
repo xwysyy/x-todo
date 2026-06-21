@@ -65,6 +65,12 @@ bool ParseIntToken(const std::wstring& token, int& value) {
     return true;
 }
 
+bool IsAsciiDayKey(const std::wstring& value) {
+    if (value.size() != 10) return false;
+    std::string day(value.begin(), value.end());
+    return IsValidCalendarDayKey(day);
+}
+
 struct UiKeyValue {
     std::wstring key;
     std::wstring value;
@@ -131,13 +137,41 @@ std::wstring Unescape(const std::wstring& in) {
     return out;
 }
 
-bool ParseText(const std::wstring& text, TodoModel& model, WindowGeometry& geom, UiState& ui) {
+bool ParseCalendarLine(const std::wstring& line, CalendarBlock& block) {
+    std::wstring body = line.substr(9);
+    size_t idEnd = body.find(L' ');
+    size_t dayEnd = idEnd == std::wstring::npos ? std::wstring::npos : body.find(L' ', idEnd + 1);
+    size_t startEnd = dayEnd == std::wstring::npos ? std::wstring::npos : body.find(L' ', dayEnd + 1);
+    size_t endEnd = startEnd == std::wstring::npos ? std::wstring::npos : body.find(L' ', startEnd + 1);
+    if (idEnd == std::wstring::npos || dayEnd == std::wstring::npos ||
+        startEnd == std::wstring::npos || endEnd == std::wstring::npos) {
+        return false;
+    }
+
+    int id = 0, startMinute = 0, endMinute = 0;
+    if (!ParseIntToken(body.substr(0, idEnd), id)) return false;
+    const std::wstring dayWide = body.substr(idEnd + 1, dayEnd - idEnd - 1);
+    if (!IsAsciiDayKey(dayWide)) return false;
+    if (!ParseIntToken(body.substr(dayEnd + 1, startEnd - dayEnd - 1), startMinute)) return false;
+    if (!ParseIntToken(body.substr(startEnd + 1, endEnd - startEnd - 1), endMinute)) return false;
+
+    block.id = id;
+    block.day = std::string(dayWide.begin(), dayWide.end());
+    block.startMinute = startMinute;
+    block.endMinute = endMinute;
+    block.title = Unescape(body.substr(endEnd + 1));
+    return true;
+}
+
+bool ParseText(const std::wstring& text, TodoModel& model, CalendarModel& calendar,
+               WindowGeometry& geom, UiState& ui) {
     const bool v2 = StartsWith(text, L"XTODO v2");
     const bool v3 = StartsWith(text, L"XTODO v3");
     const bool v4 = StartsWith(text, L"XTODO v4");
     const bool multiList = v2 || v3 || v4;
     std::vector<TodoItem> legacyItems;
     std::vector<TodoList> lists;
+    std::vector<CalendarBlock> calendarBlocks;
     TodoList* currentList = nullptr;
     std::string selectedListId;
 
@@ -212,6 +246,9 @@ bool ParseText(const std::wstring& text, TodoModel& model, WindowGeometry& geom,
                 lists.push_back(std::move(list));
                 currentList = &lists.back();
             }
+        } else if (StartsWith(line, L"calendar ")) {
+            CalendarBlock block;
+            if (ParseCalendarLine(line, block)) calendarBlocks.push_back(std::move(block));
         } else if (StartsWith(line, L"win ")) {
             int x = 0, y = 0, w = 0, h = 0;
             if (std::swscanf(line.c_str() + 4, L"%d %d %d %d", &x, &y, &w, &h) == 4) {
@@ -258,16 +295,24 @@ bool ParseText(const std::wstring& text, TodoModel& model, WindowGeometry& geom,
                     ui.capsuleDockT = std::clamp(d, 0.0, 1.0);
             } else if (k == L"capsule_monitor") {
                 ui.capsuleMonitor = WideToUtf8(Unescape(v));
+            } else if (k == L"active_view") {
+                if (v == L"list" || v == L"calendar")
+                    ui.activeView = std::string(v.begin(), v.end());
+            } else if (k == L"calendar_day") {
+                if (IsAsciiDayKey(v))
+                    ui.calendarDay = std::string(v.begin(), v.end());
             }
         }
     }
 
     if (multiList) model.ReplaceLists(std::move(lists), selectedListId);
     else           model.ReplaceAll(std::move(legacyItems), ui.completedExpanded);
+    calendar.ReplaceBlocks(std::move(calendarBlocks));
     return true;
 }
 
-std::wstring SerializeText(const TodoModel& model, const WindowGeometry& geom, const UiState& ui) {
+std::wstring SerializeText(const TodoModel& model, const CalendarModel& calendar,
+                           const WindowGeometry& geom, const UiState& ui) {
     std::wstring text = L"XTODO v4\n";
     if (geom.valid) {
         wchar_t buf[128];
@@ -297,9 +342,24 @@ std::wstring SerializeText(const TodoModel& model, const WindowGeometry& geom, c
     }
     if (!ui.capsuleMonitor.empty())
         text += L"ui capsule_monitor=" + Escape(Utf8ToWide(ui.capsuleMonitor)) + L"\n";
+    text += L"ui active_view=" + NarrowAsciiToWide(ui.activeView == "calendar" ? "calendar" : "list") + L"\n";
+    if (IsValidCalendarDayKey(ui.calendarDay))
+        text += L"ui calendar_day=" + NarrowAsciiToWide(ui.calendarDay) + L"\n";
 
     const TodoList& current = model.CurrentList();
     text += L"ui current_list=" + Escape(Utf8ToWide(current.id)) + L"\n";
+
+    for (const CalendarBlock& block : calendar.Blocks()) {
+        if (!IsValidCalendarDayKey(block.day)) continue;
+        wchar_t buf[96];
+        std::swprintf(buf, sizeof(buf) / sizeof(buf[0]), L"calendar %d %ls %d %d ",
+                      block.id, NarrowAsciiToWide(block.day).c_str(),
+                      ClampCalendarMinute(block.startMinute),
+                      ClampCalendarMinute(block.endMinute));
+        text += buf;
+        text += Escape(block.title);
+        text += L"\n";
+    }
 
     for (const auto& list : model.Lists()) {
         text += L"list ";

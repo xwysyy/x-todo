@@ -62,12 +62,12 @@ TabStrip ComputeTabStrip(float windowWidth, float dpiScale, const std::vector<Ta
     const float maxRight = out.addList.left - tabGap;
     for (const TabMetric& tab : tabs) {
         const float titleW = S(7.0f, dpiScale) * static_cast<float>(tab.titleLength);
-        const float countW = CountWidth(tab.activeCount, dpiScale);
+        const float countW = tab.kind == TabKind::List ? CountWidth(tab.activeCount, dpiScale) : 0.0f;
         float wantW = S(20.0f, dpiScale) + titleW + (countW > 0.0f ? S(7.0f, dpiScale) + countW : 0.0f);
         if (wantW < tabMinW) wantW = tabMinW;
         if (wantW > tabMaxW) wantW = tabMaxW;
         if (x + wantW > maxRight) break;
-        out.tabs.push_back(TabRect{ tab.listIndex, Gui::Rect{ x, tabY, x + wantW, tabY + tabH } });
+        out.tabs.push_back(TabRect{ tab.listIndex, tab.kind, Gui::Rect{ x, tabY, x + wantW, tabY + tabH } });
         x += wantW + tabGap;
     }
     return out;
@@ -135,7 +135,9 @@ ChromeHitResult HitTestChrome(float x, float y, float dpiScale,
     if (y < S(Theme::kTitleH + Theme::kTabsH, dpiScale)) {
         if (addList.Contains(x, y)) return ChromeHitResult{ ChromeHit::AddList, -1 };
         for (const TabRect& tab : tabs) {
-            if (tab.rect.Contains(x, y)) return ChromeHitResult{ ChromeHit::ListTab, tab.listIndex };
+            if (!tab.rect.Contains(x, y)) continue;
+            if (tab.kind == TabKind::Calendar) return ChromeHitResult{ ChromeHit::CalendarTab, -1 };
+            return ChromeHitResult{ ChromeHit::ListTab, tab.listIndex };
         }
     }
     return {};

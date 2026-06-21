@@ -6,6 +6,7 @@
 
 #include <commctrl.h>
 #include <cmath>
+#include <ctime>
 #include <cstdio>
 #include <cwchar>
 #include <string>
@@ -49,6 +50,60 @@ std::wstring NormalizeTodoText(std::wstring text) {
         if (ch == L'\r' || ch == L'\n' || ch == L'\t') ch = L' ';
     }
     return Trim(text);
+}
+
+std::string TodayDayKey() {
+    SYSTEMTIME st{};
+    GetLocalTime(&st);
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
+                  static_cast<int>(st.wYear), static_cast<int>(st.wMonth), static_cast<int>(st.wDay));
+    return std::string(buf);
+}
+
+int CurrentMinuteOfDay() {
+    SYSTEMTIME st{};
+    GetLocalTime(&st);
+    return static_cast<int>(st.wHour) * 60 + static_cast<int>(st.wMinute);
+}
+
+bool ParseDayKey(const std::string& day, int& year, int& month, int& date) {
+    if (!IsValidCalendarDayKey(day)) return false;
+    year = (day[0] - '0') * 1000 + (day[1] - '0') * 100 + (day[2] - '0') * 10 + (day[3] - '0');
+    month = (day[5] - '0') * 10 + (day[6] - '0');
+    date = (day[8] - '0') * 10 + (day[9] - '0');
+    return true;
+}
+
+std::string OffsetDayKey(const std::string& day, int deltaDays) {
+    int year = 0, month = 0, date = 0;
+    if (!ParseDayKey(day, year, month, date)) return TodayDayKey();
+    std::tm tm{};
+    tm.tm_year = year - 1900;
+    tm.tm_mon = month - 1;
+    tm.tm_mday = date + deltaDays;
+    tm.tm_hour = 12;
+    if (std::mktime(&tm) == static_cast<std::time_t>(-1)) return day;
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
+                  tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
+    return std::string(buf);
+}
+
+std::wstring WidenAscii(const std::string& value) {
+    return std::wstring(value.begin(), value.end());
+}
+
+std::wstring CalendarDayLabel(const std::string& day, Lang lang) {
+    int year = 0, month = 0, date = 0;
+    if (!ParseDayKey(day, year, month, date)) return WidenAscii(day);
+    wchar_t buf[32];
+    if (lang == Lang::Zh) {
+        swprintf_s(buf, L"%04d年%02d月%02d日", year, month, date);
+    } else {
+        swprintf_s(buf, L"%04d-%02d-%02d", year, month, date);
+    }
+    return std::wstring(buf);
 }
 
 bool IsWrapDelimiter(wchar_t ch) {
@@ -127,9 +182,11 @@ void MainWindow::RebuildLayout() {
         if (r.strikeLayout) { r.strikeLayout->Release(); r.strikeLayout = nullptr; }
     rows_.clear();
     listTabs_.clear();
+    calendarBlockRects_.clear();
     activeEndY_ = 0.0f;
     emptyActiveRect_ = D2D1::RectF(0, 0, 0, 0);
     addListRect_ = D2D1::RectF(0, 0, 0, 0);
+    calendarTabRect_ = D2D1::RectF(0, 0, 0, 0);
 
     RECT rc;
     GetClientRect(hwnd_, &rc);
@@ -206,7 +263,8 @@ void MainWindow::RebuildLayout() {
     menuRect_  = ToD2DRect(title.menu);
 
     std::vector<GuiLayout::TabMetric> tabMetrics;
-    tabMetrics.reserve((size_t)model_.ListCount());
+    tabMetrics.reserve((size_t)model_.ListCount() + 1);
+    tabMetrics.push_back(GuiLayout::TabMetric{ -1, std::wcslen(T(Str::Calendar, lang_)), 0, GuiLayout::TabKind::Calendar });
     for (int i = 0; i < model_.ListCount(); ++i) {
         const TodoList* list = model_.ListAt(i);
         if (!list) continue;
@@ -215,8 +273,18 @@ void MainWindow::RebuildLayout() {
     const GuiLayout::TabStrip tabStrip = GuiLayout::ComputeTabStrip(W, dpiScale(), tabMetrics);
     addListRect_ = ToD2DRect(tabStrip.addList);
     for (const GuiLayout::TabRect& tab : tabStrip.tabs) {
-        listTabs_.push_back(ListTabLayout{ tab.listIndex, ToD2DRect(tab.rect) });
+        if (tab.kind == GuiLayout::TabKind::Calendar) {
+            calendarTabRect_ = ToD2DRect(tab.rect);
+        } else {
+            listTabs_.push_back(ListTabLayout{ tab.listIndex, ToD2DRect(tab.rect) });
+        }
     }
+
+    calendarFrame_ = GuiCalendar::ComputeFrame(W, ViewportHeight(), dpiScale());
+    BuildCalendarBlockRects();
+    if (calendarActive() && !calendarScrollInitialized_) AlignCalendarScrollToNow(false);
+    ClampCalendarScroll();
+    if (calendarEditing()) LayoutCalendarEditControls();
 }
 
 float MainWindow::MeasureRowHeight(const std::wstring& text, float textWidth) {
@@ -250,9 +318,11 @@ MainWindow::Hit MainWindow::HitTest(float x, float y) {
         title.theme = ToGuiRect(themeRect_);
         title.menu = ToGuiRect(menuRect_);
         std::vector<GuiLayout::TabRect> tabs;
-        tabs.reserve(listTabs_.size());
+        tabs.reserve(listTabs_.size() + 1);
+        if (calendarTabRect_.right > calendarTabRect_.left)
+            tabs.push_back(GuiLayout::TabRect{ -1, GuiLayout::TabKind::Calendar, ToGuiRect(calendarTabRect_) });
         for (const ListTabLayout& tab : listTabs_)
-            tabs.push_back(GuiLayout::TabRect{ tab.listIndex, ToGuiRect(tab.rect) });
+            tabs.push_back(GuiLayout::TabRect{ tab.listIndex, GuiLayout::TabKind::List, ToGuiRect(tab.rect) });
 
         const GuiLayout::ChromeHitResult chrome =
             GuiLayout::HitTestChrome(x, y, dpiScale(), title, ToGuiRect(addListRect_), tabs);
@@ -262,12 +332,46 @@ MainWindow::Hit MainWindow::HitTest(float x, float y) {
         case GuiLayout::ChromeHit::Pin:     h.kind = HitKind::Pin;     return h;
         case GuiLayout::ChromeHit::Close:   h.kind = HitKind::Close;   return h;
         case GuiLayout::ChromeHit::AddList: h.kind = HitKind::AddList; return h;
+        case GuiLayout::ChromeHit::CalendarTab:
+            h.kind = HitKind::CalendarTab;
+            return h;
         case GuiLayout::ChromeHit::ListTab:
             h.kind = HitKind::ListTab;
             h.itemIndex = chrome.listIndex;
             return h;
         case GuiLayout::ChromeHit::None:
             return h; // 标题栏空白交给 NCHITTEST 拖动；标签栏空白无动作
+        }
+    }
+
+    if (calendarActive()) {
+        const float localY = y - ContentTop();
+        const GuiCalendar::HitResult calendarHit =
+            GuiCalendar::HitTest(x, localY, calendarScroll_, dpiScale(), calendarFrame_, calendarBlockRects_);
+        switch (calendarHit.kind) {
+        case GuiCalendar::HitKind::PrevDay:
+            h.kind = HitKind::CalendarPrevDay;
+            return h;
+        case GuiCalendar::HitKind::NextDay:
+            h.kind = HitKind::CalendarNextDay;
+            return h;
+        case GuiCalendar::HitKind::EmptyTimeline:
+            h.kind = HitKind::CalendarEmptyTimeline;
+            return h;
+        case GuiCalendar::HitKind::BlockBody:
+            h.kind = HitKind::CalendarBlock;
+            h.itemIndex = calendarHit.blockId;
+            return h;
+        case GuiCalendar::HitKind::ResizeStart:
+            h.kind = HitKind::CalendarResizeStart;
+            h.itemIndex = calendarHit.blockId;
+            return h;
+        case GuiCalendar::HitKind::ResizeEnd:
+            h.kind = HitKind::CalendarResizeEnd;
+            h.itemIndex = calendarHit.blockId;
+            return h;
+        case GuiCalendar::HitKind::None:
+            return h;
         }
     }
 
@@ -502,11 +606,24 @@ void MainWindow::DrawListTabs() {
              theme_.colors.paper);
 
     const int current = model_.CurrentListIndex();
+    if (calendarTabRect_.right > calendarTabRect_.left) {
+        const bool selected = calendarActive();
+        if (selected) {
+            DrawSurfaceFrame(calendarTabRect_, S(8), theme_.colors.paperElevated,
+                             theme_.colors.paperEdge, S(1));
+        }
+        D2D1_RECT_F textR = calendarTabRect_;
+        textR.left += S(10);
+        textR.right -= S(9);
+        Text(T(Str::Calendar, lang_), textR,
+             selected ? theme_.colors.text : theme_.colors.textWeak, smallFormat_);
+    }
+
     for (const ListTabLayout& tab : listTabs_) {
         const TodoList* list = model_.ListAt(tab.listIndex);
         if (!list) continue;
 
-        const bool selected = tab.listIndex == current;
+        const bool selected = !calendarActive() && tab.listIndex == current;
         if (selected) {
             DrawSurfaceFrame(tab.rect, S(8), theme_.colors.paperElevated,
                              theme_.colors.paperEdge, S(1));
@@ -583,6 +700,98 @@ void MainWindow::DrawEmptyActivePrompt(bool hovered) {
          hovered ? theme_.colors.checkFill : theme_.colors.textWeak, smallFormat_);
 }
 
+void MainWindow::DrawCalendarView(float W, float H) {
+    const float top = ContentTop();
+    const GuiCalendar::Frame& frame = calendarFrame_;
+    const uint32_t subtle = Theme::Blend(theme_.colors.checkFill, theme_.colors.paper, 0.07f);
+    const uint32_t blockFill = Theme::Blend(theme_.colors.checkFill, theme_.colors.paperElevated, 0.14f);
+    const uint32_t selectedFill = Theme::Blend(theme_.colors.checkFill, theme_.colors.paperElevated, 0.20f);
+    const uint32_t blockEdge = Theme::Blend(theme_.colors.checkFill, theme_.colors.paperEdge, 0.45f);
+
+    D2D1_RECT_F dateR = ToD2DRect(frame.dateHeader);
+    dateR.top += top;
+    dateR.bottom += top;
+    FillRect(dateR, theme_.colors.paper);
+    Text(CalendarDayLabel(calendarDay_, lang_), dateR, theme_.colors.text, textFormat_);
+
+    D2D1_RECT_F prevR = ToD2DRect(frame.prevDay);
+    prevR.top += top;
+    prevR.bottom += top;
+    D2D1_RECT_F nextR = ToD2DRect(frame.nextDay);
+    nextR.top += top;
+    nextR.bottom += top;
+    DrawSurfaceFrame(prevR, S(7), theme_.colors.paperElevated, theme_.colors.paperEdge, S(1));
+    DrawSurfaceFrame(nextR, S(7), theme_.colors.paperElevated, theme_.colors.paperEdge, S(1));
+    Text(L"<", prevR, theme_.colors.textWeak, smallFormat_);
+    Text(L">", nextR, theme_.colors.textWeak, smallFormat_);
+
+    D2D1_RECT_F allDay = ToD2DRect(frame.allDay);
+    allDay.top += top;
+    allDay.bottom += top;
+    DrawSurfaceFrame(allDay, S(7), theme_.colors.paperElevated, theme_.colors.paperEdge, S(1));
+    D2D1_RECT_F allDayLabel = allDay;
+    allDayLabel.left += S(10);
+    allDayLabel.right = allDayLabel.left + S(54);
+    Text(T(Str::AllDay, lang_), allDayLabel, theme_.colors.textWeak, smallFormat_);
+
+    const D2D1_RECT_F clip = D2D1::RectF(0, top + frame.timelineViewport.top, W, H - S(Theme::kFooterH));
+    rt_->PushAxisAlignedClip(clip, D2D1_ANTIALIAS_MODE_ALIASED);
+    rt_->SetTransform(D2D1::Matrix3x2F::Translation(0, top + frame.timelineViewport.top - calendarScroll_));
+
+    for (int hour = 0; hour <= 24; ++hour) {
+        const float y = (static_cast<float>(hour) / 24.0f) * frame.contentHeight;
+        brush_->SetColor(Theme::D2DColor(hour == 0 ? theme_.colors.divider : subtle));
+        rt_->DrawLine(D2D1::Point2F(frame.lane.left, y),
+                      D2D1::Point2F(frame.lane.right, y), brush_, S(hour % 6 == 0 ? 1.2f : 1.0f));
+        if (hour < 24) {
+            wchar_t buf[8];
+            swprintf_s(buf, L"%02d:00", hour);
+            D2D1_RECT_F label = D2D1::RectF(S(7), y - S(8), frame.gutter.right - S(7), y + S(12));
+            smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+            Text(buf, label, theme_.colors.textWeak, smallFormat_);
+            smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        }
+    }
+
+    const bool today = calendarDay_ == TodayDayKey();
+    if (today) {
+        const float y = (static_cast<float>(CurrentMinuteOfDay()) / 1440.0f) * frame.contentHeight;
+        brush_->SetColor(Theme::D2DColor(theme_.colors.focusRing));
+        rt_->DrawLine(D2D1::Point2F(frame.lane.left, y),
+                      D2D1::Point2F(frame.lane.right, y), brush_, S(1.4f));
+    }
+
+    for (const GuiCalendar::BlockRect& blockRect : calendarBlockRects_) {
+        const CalendarBlock* block = calendar_.FindBlock(blockRect.blockId);
+        if (!block) continue;
+        const bool selected = block->id == calendarEditId_;
+        D2D1_RECT_F r = ToD2DRect(blockRect.rect);
+        const float radius = S(7);
+        DrawSurfaceFrame(r, radius, selected ? selectedFill : blockFill,
+                         selected ? theme_.colors.focusRing : blockEdge, S(selected ? 1.2f : 1.0f));
+
+        D2D1_RECT_F timeR = r;
+        timeR.left += S(8);
+        timeR.right -= S(8);
+        timeR.top += S(4);
+        timeR.bottom = timeR.top + S(16);
+        std::wstring timeText = GuiCalendar::FormatTimeText(block->startMinute) + L" - " +
+                                GuiCalendar::FormatTimeText(block->endMinute);
+        Text(timeText, timeR, theme_.colors.textWeak, smallFormat_);
+
+        D2D1_RECT_F titleR = r;
+        titleR.left += S(8);
+        titleR.right -= S(8);
+        titleR.top += S(20);
+        titleR.bottom -= S(4);
+        Text(block->title.empty() ? std::wstring(L"") : block->title,
+             titleR, theme_.colors.text, smallFormat_);
+    }
+
+    rt_->SetTransform(D2D1::Matrix3x2F::Identity());
+    rt_->PopAxisAlignedClip();
+}
+
 bool MainWindow::Render() {
     if (capsuleShrunk() && capsuleStyle_ == CapsuleStyle::Dot)
         return RenderDotCapsuleLayered();
@@ -619,28 +828,31 @@ bool MainWindow::Render() {
     rt_->SetTransform(D2D1::Matrix3x2F::Identity());
     rt_->Clear(Theme::D2DColor(theme_.colors.paper));
 
-    // 可滚动内容层
-    D2D1_RECT_F vp = D2D1::RectF(0, ContentTop(), W, H - S(Theme::kFooterH));
-    rt_->PushAxisAlignedClip(vp, D2D1_ANTIALIAS_MODE_ALIASED);
-    rt_->SetTransform(D2D1::Matrix3x2F::Translation(0, ContentTop() - scroll_));
+    if (calendarActive()) {
+        DrawCalendarView(W, H);
+    } else {
+        D2D1_RECT_F vp = D2D1::RectF(0, ContentTop(), W, H - S(Theme::kFooterH));
+        rt_->PushAxisAlignedClip(vp, D2D1_ANTIALIAS_MODE_ALIASED);
+        rt_->SetTransform(D2D1::Matrix3x2F::Translation(0, ContentTop() - scroll_));
 
-    DrawEmptyActivePrompt(hoverRow_ == kHoverEmptyActive);
-    for (size_t i = 0; i < rows_.size(); i++)
-        DrawRow(rows_[i], (int)i == hoverRow_);
-    DrawSection();
+        DrawEmptyActivePrompt(hoverRow_ == kHoverEmptyActive);
+        for (size_t i = 0; i < rows_.size(); i++)
+            DrawRow(rows_[i], (int)i == hoverRow_);
+        DrawSection();
 
-    if (dragging_ && dragInsert_ >= 0) {
-        float yy = activeEndY_;
-        for (const RowLayout& r : rows_) {
-            if (!r.completed && r.itemIndex == dragInsert_) { yy = r.row.top; break; }
+        if (dragging_ && dragInsert_ >= 0) {
+            float yy = activeEndY_;
+            for (const RowLayout& r : rows_) {
+                if (!r.completed && r.itemIndex == dragInsert_) { yy = r.row.top; break; }
+            }
+            brush_->SetColor(Theme::D2DColor(theme_.colors.focusRing));
+            rt_->DrawLine(D2D1::Point2F(S(Theme::kPadX), yy),
+                          D2D1::Point2F(W - S(Theme::kPadX), yy), brush_, S(2));
         }
-        brush_->SetColor(Theme::D2DColor(theme_.colors.focusRing));
-        rt_->DrawLine(D2D1::Point2F(S(Theme::kPadX), yy),
-                      D2D1::Point2F(W - S(Theme::kPadX), yy), brush_, S(2));
-    }
 
-    rt_->SetTransform(D2D1::Matrix3x2F::Identity());
-    rt_->PopAxisAlignedClip();
+        rt_->SetTransform(D2D1::Matrix3x2F::Identity());
+        rt_->PopAxisAlignedClip();
+    }
 
     // 固定层
     DrawTitleBar();
@@ -734,6 +946,36 @@ void MainWindow::OnLButtonDown(float x, float y) {
     if (capsuleShrunk()) { BeginCapsulePress((int)x, (int)y); return; } // 区分点击展开 / 拖动吸附
     if (editing()) CommitEdit(false);
     Hit h = HitTest(x, y);
+    if (calendarActive()) {
+        if (calendarEditing()) {
+            const bool sameBlock =
+                (h.kind == HitKind::CalendarBlock || h.kind == HitKind::CalendarResizeStart ||
+                 h.kind == HitKind::CalendarResizeEnd) && h.itemIndex == calendarEditId_;
+            if (!sameBlock) EndCalendarEdit(true);
+        }
+        pressHit_ = h;
+        if (h.kind == HitKind::CalendarEmptyTimeline) {
+            calendarDrag_.mode = CalendarDragMode::PendingCreate;
+            calendarDrag_.startX = x;
+            calendarDrag_.startY = y;
+            calendarDrag_.anchorMinute = GuiCalendar::MinuteFromPoint(y - ContentTop(), calendarScroll_, calendarFrame_);
+            return;
+        }
+        if (h.kind == HitKind::CalendarBlock || h.kind == HitKind::CalendarResizeStart ||
+            h.kind == HitKind::CalendarResizeEnd) {
+            const CalendarBlock* block = calendar_.FindBlock(h.itemIndex);
+            if (block) {
+                calendarDrag_.mode = CalendarDragMode::PendingBlock;
+                calendarDrag_.blockId = block->id;
+                calendarDrag_.startX = x;
+                calendarDrag_.startY = y;
+                calendarDrag_.anchorMinute = GuiCalendar::MinuteFromPoint(y - ContentTop(), calendarScroll_, calendarFrame_);
+                calendarDrag_.originalStart = block->startMinute;
+                calendarDrag_.originalEnd = block->endMinute;
+            }
+        }
+        return;
+    }
     pressHit_ = h;
     if (h.kind == HitKind::Handle) {
         dragging_   = true;
@@ -745,6 +987,32 @@ void MainWindow::OnLButtonDown(float x, float y) {
 
 void MainWindow::OnLButtonUp(float x, float y) {
     if (capsulePressing_) { FinishCapsulePress(); return; } // 胶囊按压：松手收尾（展开或吸附）
+    if (calendarActive() && calendarDrag_.mode != CalendarDragMode::None) {
+        const CalendarDragMode mode = calendarDrag_.mode;
+        const int blockId = calendarDrag_.blockId;
+        ResetCalendarDrag();
+        if (mode == CalendarDragMode::Creating && calendar_.FindBlock(blockId)) {
+            BuildCalendarBlockRects();
+            BeginCalendarEdit(blockId, true);
+            ScheduleSave();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return;
+        }
+        if ((mode == CalendarDragMode::Moving || mode == CalendarDragMode::ResizingStart ||
+             mode == CalendarDragMode::ResizingEnd) && calendar_.FindBlock(blockId)) {
+            if (calendarEditId_ == blockId) SyncCalendarEditors();
+            ScheduleSave();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return;
+        }
+        if (mode == CalendarDragMode::PendingBlock && calendar_.FindBlock(blockId)) {
+            BeginCalendarEdit(blockId, true);
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return;
+        }
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
     if (dragging_) {
         dragging_ = false;
         if (dragInsert_ >= 0) {
@@ -802,6 +1070,14 @@ void MainWindow::OnLButtonUp(float x, float y) {
     case HitKind::Clear:   ClearCompletedConfirm();   break;
     case HitKind::ListTab: SwitchList(h.itemIndex);   break;
     case HitKind::AddList: CreateList();              break;
+    case HitKind::CalendarTab: SetActiveView(MainView::Calendar); break;
+    case HitKind::CalendarPrevDay: SwitchCalendarDay(-1); break;
+    case HitKind::CalendarNextDay: SwitchCalendarDay(1);  break;
+    case HitKind::CalendarBlock:
+    case HitKind::CalendarResizeStart:
+    case HitKind::CalendarResizeEnd:
+        BeginCalendarEdit(h.itemIndex, true);
+        break;
     case HitKind::EmptyActive:
         CreateEmptyActiveItem();
         break;
@@ -819,6 +1095,7 @@ void MainWindow::OnLButtonDoubleClick(float x, float y) {
     if (animActive_ || capsuleShrunk()) return;
     if (editing()) CommitEdit(false);
     Hit h = HitTest(x, y);
+    if (h.kind == HitKind::CalendarTab) { SetActiveView(MainView::Calendar); return; }
     if (h.kind == HitKind::ListTab) RenameList(h.itemIndex);
 }
 
@@ -826,11 +1103,71 @@ void MainWindow::OnRButtonUp(float x, float y) {
     if (animActive_ || capsuleShrunk()) return;
     if (editing()) CommitEdit(false);
     Hit h = HitTest(x, y);
+    if (h.kind == HitKind::CalendarTab) { SetActiveView(MainView::Calendar); return; }
     if (h.kind == HitKind::ListTab) ShowListTabMenu(h.itemIndex, x, y);
 }
 
 void MainWindow::OnMouseMove(float x, float y, bool lButton) {
     if (capsulePressing_) { UpdateCapsulePress(lButton); return; } // 胶囊按压：判定拖动并跟随
+    if (calendarActive() && calendarDrag_.mode != CalendarDragMode::None) {
+        if (!lButton) { ResetCalendarDrag(); InvalidateRect(hwnd_, nullptr, FALSE); return; }
+        const int minute = GuiCalendar::MinuteFromPoint(y - ContentTop(), calendarScroll_, calendarFrame_);
+        if (calendarDrag_.mode == CalendarDragMode::PendingCreate) {
+            if (!GuiCalendar::DragExceeded(calendarDrag_.startX, calendarDrag_.startY, x, y, dpiScale()))
+                return;
+            const GuiCalendar::TimeRange range = GuiCalendar::RangeFromDrag(calendarDrag_.anchorMinute, minute);
+            const int id = calendar_.AddBlock(calendarDay_, range.startMinute, range.endMinute, L"");
+            if (id > 0) {
+                calendarDrag_.mode = CalendarDragMode::Creating;
+                calendarDrag_.blockId = id;
+                BuildCalendarBlockRects();
+                InvalidateRect(hwnd_, nullptr, FALSE);
+            }
+            return;
+        }
+
+        if (calendarDrag_.mode == CalendarDragMode::PendingBlock) {
+            if (!GuiCalendar::DragExceeded(calendarDrag_.startX, calendarDrag_.startY, x, y, dpiScale()))
+                return;
+            if (pressHit_.kind == HitKind::CalendarResizeStart)
+                calendarDrag_.mode = CalendarDragMode::ResizingStart;
+            else if (pressHit_.kind == HitKind::CalendarResizeEnd)
+                calendarDrag_.mode = CalendarDragMode::ResizingEnd;
+            else
+                calendarDrag_.mode = CalendarDragMode::Moving;
+        }
+
+        bool changed = false;
+        if (calendarDrag_.mode == CalendarDragMode::Creating) {
+            const GuiCalendar::TimeRange range = GuiCalendar::RangeFromDrag(calendarDrag_.anchorMinute, minute);
+            changed = calendar_.SetBlockRange(calendarDrag_.blockId, range.startMinute, range.endMinute);
+        } else if (calendarDrag_.mode == CalendarDragMode::Moving) {
+            const int duration = calendarDrag_.originalEnd - calendarDrag_.originalStart;
+            int delta = GuiCalendar::SnapMinute(minute) - GuiCalendar::SnapMinute(calendarDrag_.anchorMinute);
+            int start = calendarDrag_.originalStart + delta;
+            if (start < 0) start = 0;
+            if (start + duration > 1440) start = 1440 - duration;
+            if (start < 0) start = 0;
+            changed = calendar_.SetBlockRange(calendarDrag_.blockId, start, start + duration);
+        } else if (calendarDrag_.mode == CalendarDragMode::ResizingStart) {
+            int start = GuiCalendar::SnapMinute(minute);
+            if (start > calendarDrag_.originalEnd - 15) start = calendarDrag_.originalEnd - 15;
+            if (start < 0) start = 0;
+            changed = calendar_.SetBlockRange(calendarDrag_.blockId, start, calendarDrag_.originalEnd);
+        } else if (calendarDrag_.mode == CalendarDragMode::ResizingEnd) {
+            int end = GuiCalendar::SnapMinute(minute);
+            if (end < calendarDrag_.originalStart + 15) end = calendarDrag_.originalStart + 15;
+            if (end > 1440) end = 1440;
+            changed = calendar_.SetBlockRange(calendarDrag_.blockId, calendarDrag_.originalStart, end);
+        }
+        if (changed) {
+            BuildCalendarBlockRects();
+            if (calendarEditId_ == calendarDrag_.blockId) LayoutCalendarEditControls();
+            ScheduleSave();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        }
+        return;
+    }
     if (dragging_) {
         dragY_ = y;
         float docY = y - ContentTop() + scroll_;
@@ -862,6 +1199,13 @@ void MainWindow::OnMouseLeave() {
 }
 
 void MainWindow::OnMouseWheel(int delta) {
+    if (calendarActive()) {
+        calendarScroll_ -= (delta / 120.0f) * S(96);
+        ClampCalendarScroll();
+        if (calendarEditing()) LayoutCalendarEditControls();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
     scroll_ -= (delta / 120.0f) * S(48);
     ClampScroll();
     if (editing()) LayoutEditBox();
@@ -902,6 +1246,299 @@ LRESULT MainWindow::OnNcHitTest(int sx, int sy) {
     case GuiHit::NonClientHit::BottomRight: return HTBOTTOMRIGHT;
     }
     return HTCLIENT;
+}
+
+// ——————————————————————————— 日历视图 / 编辑 ———————————————————————————
+
+void MainWindow::EnsureCalendarDay() {
+    if (!calendarDay_.empty() && IsValidCalendarDayKey(calendarDay_)) return;
+    if (IsValidCalendarDayKey(ui_.calendarDay)) calendarDay_ = ui_.calendarDay;
+    else calendarDay_ = TodayDayKey();
+    ui_.calendarDay = calendarDay_;
+}
+
+void MainWindow::SetActiveView(MainView view) {
+    if (view == activeView_) return;
+    if (editing()) CommitEdit(false);
+    if (calendarEditing()) EndCalendarEdit(true);
+    ResetCalendarDrag();
+    activeView_ = view;
+    ui_.activeView = view == MainView::Calendar ? "calendar" : "list";
+    hoverRow_ = -1;
+    dragging_ = false;
+    dragFrom_ = dragInsert_ = -1;
+    if (calendarActive()) {
+        EnsureCalendarDay();
+        calendarScrollInitialized_ = false;
+    }
+    RebuildLayout();
+    if (calendarActive()) AlignCalendarScrollToNow(false);
+    ScheduleSave();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void MainWindow::SwitchCalendarDay(int deltaDays) {
+    if (deltaDays == 0) return;
+    if (calendarEditing()) EndCalendarEdit(true);
+    ResetCalendarDrag();
+    EnsureCalendarDay();
+    calendarDay_ = OffsetCalendarDayKey(deltaDays);
+    ui_.calendarDay = calendarDay_;
+    calendarScrollInitialized_ = false;
+    RebuildLayout();
+    AlignCalendarScrollToNow(false);
+    ScheduleSave();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+std::string MainWindow::OffsetCalendarDayKey(int deltaDays) const {
+    return OffsetDayKey(calendarDay_.empty() ? TodayDayKey() : calendarDay_, deltaDays);
+}
+
+void MainWindow::ClampCalendarScroll() {
+    float maxScroll = calendarFrame_.contentHeight - calendarFrame_.timelineViewport.Height();
+    if (maxScroll < 0.0f) maxScroll = 0.0f;
+    if (calendarScroll_ < 0.0f) calendarScroll_ = 0.0f;
+    if (calendarScroll_ > maxScroll) calendarScroll_ = maxScroll;
+}
+
+void MainWindow::AlignCalendarScrollToNow(bool force) {
+    if (!force && calendarScrollInitialized_) return;
+    EnsureCalendarDay();
+    const int minute = (calendarDay_ == TodayDayKey()) ? CurrentMinuteOfDay() : 8 * 60;
+    calendarScroll_ = GuiCalendar::ScrollForMinute(minute, ViewportHeight(), calendarFrame_);
+    calendarScrollInitialized_ = true;
+    ClampCalendarScroll();
+}
+
+void MainWindow::BuildCalendarBlockRects() {
+    calendarBlockRects_.clear();
+    EnsureCalendarDay();
+    for (const CalendarBlock* block : calendar_.BlocksForDay(calendarDay_)) {
+        if (!block) continue;
+        calendarBlockRects_.push_back(GuiCalendar::BlockRect{
+            block->id,
+            GuiCalendar::ComputeBlockRect(calendarFrame_, block->id, block->startMinute, block->endMinute)
+        });
+    }
+}
+
+void MainWindow::EnsureCalendarEditors() {
+    if (!editFont_) {
+        LOGFONTW lf{};
+        lf.lfHeight  = -(LONG)S(Theme::kFontSize);
+        lf.lfQuality = CLEARTYPE_QUALITY;
+        wcscpy_s(lf.lfFaceName, Theme::kFontFamily);
+        editFont_ = CreateFontIndirectW(&lf);
+    }
+    auto createEdit = [&](HWND& edit, DWORD style) {
+        if (edit) return;
+        edit = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | style,
+                               0, 0, 10, 10, hwnd_, nullptr, GetModuleHandleW(nullptr), nullptr);
+        SetWindowSubclass(edit, CalendarEditProcStatic, 2, (DWORD_PTR)this);
+        SendMessageW(edit, WM_SETFONT, (WPARAM)editFont_, TRUE);
+        SendMessageW(edit, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(RoundToInt(S(3)), RoundToInt(S(3))));
+    };
+    createEdit(calendarTitleEdit_, ES_AUTOHSCROLL);
+    createEdit(calendarStartEdit_, ES_AUTOHSCROLL | ES_CENTER);
+    createEdit(calendarEndEdit_, ES_AUTOHSCROLL | ES_CENTER);
+}
+
+void MainWindow::BeginCalendarEdit(int blockId, bool selectTitle) {
+    const CalendarBlock* block = calendar_.FindBlock(blockId);
+    if (!block) return;
+    if (editing()) CommitEdit(false);
+    EnsureCalendarEditors();
+    calendarEditId_ = blockId;
+    SyncCalendarEditors();
+    LayoutCalendarEditControls();
+    ShowWindow(calendarTitleEdit_, SW_SHOW);
+    ShowWindow(calendarStartEdit_, SW_SHOW);
+    ShowWindow(calendarEndEdit_, SW_SHOW);
+    SetFocus(calendarTitleEdit_);
+    if (selectTitle) {
+        int len = GetWindowTextLengthW(calendarTitleEdit_);
+        SendMessageW(calendarTitleEdit_, EM_SETSEL, 0, len);
+    }
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void MainWindow::EndCalendarEdit(bool removeEmpty) {
+    if (!calendarEditing()) return;
+    const int blockId = calendarEditId_;
+    if (calendarTitleEdit_) calendar_.SetBlockTitle(blockId, ReadWindowText(calendarTitleEdit_));
+    CommitCalendarTimeEdit(calendarStartEdit_, true);
+    CommitCalendarTimeEdit(calendarEndEdit_, true);
+    calendarEditId_ = -1;
+    HideCalendarEditors();
+    if (removeEmpty && CalendarBlockTitleEmpty(blockId)) {
+        calendar_.RemoveBlock(blockId);
+    }
+    BuildCalendarBlockRects();
+    ScheduleSave();
+    SetFocus(hwnd_);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void MainWindow::HideCalendarEditors() {
+    if (calendarTitleEdit_) ShowWindow(calendarTitleEdit_, SW_HIDE);
+    if (calendarStartEdit_) ShowWindow(calendarStartEdit_, SW_HIDE);
+    if (calendarEndEdit_) ShowWindow(calendarEndEdit_, SW_HIDE);
+}
+
+void MainWindow::SyncCalendarEditors() {
+    if (!calendarEditing()) return;
+    const CalendarBlock* block = calendar_.FindBlock(calendarEditId_);
+    if (!block) return;
+    EnsureCalendarEditors();
+    calendarSyncing_ = true;
+    SetWindowTextW(calendarTitleEdit_, block->title.c_str());
+    SetWindowTextW(calendarStartEdit_, GuiCalendar::FormatTimeText(block->startMinute).c_str());
+    SetWindowTextW(calendarEndEdit_, GuiCalendar::FormatTimeText(block->endMinute).c_str());
+    calendarSyncing_ = false;
+}
+
+void MainWindow::LayoutCalendarEditControls() {
+    if (!calendarEditing() || !calendarTitleEdit_) return;
+    const CalendarBlock* block = calendar_.FindBlock(calendarEditId_);
+    if (!block) { EndCalendarEdit(false); return; }
+
+    Gui::Rect rect{};
+    bool found = false;
+    for (const GuiCalendar::BlockRect& blockRect : calendarBlockRects_) {
+        if (blockRect.blockId == calendarEditId_) {
+            rect = blockRect.rect;
+            found = true;
+            break;
+        }
+    }
+    if (!found) { HideCalendarEditors(); return; }
+
+    const float clientTop = ContentTop() + calendarFrame_.timelineViewport.top - calendarScroll_;
+    const int left = RoundToInt(rect.left + S(8));
+    const int top = RoundToInt(clientTop + rect.top + S(4));
+    const int width = RoundToInt(rect.right - rect.left - S(16));
+    const int timeW = RoundToInt(S(54));
+    const int timeH = RoundToInt(S(18));
+    const int gap = RoundToInt(S(5));
+    const int titleTop = top + timeH + RoundToInt(S(3));
+    int titleH = RoundToInt(rect.bottom - rect.top - S(28));
+    if (titleH < RoundToInt(S(18))) titleH = RoundToInt(S(18));
+
+    const int viewportTop = RoundToInt(ContentTop() + calendarFrame_.timelineViewport.top);
+    const int viewportBottom = RoundToInt(ContentTop() + calendarFrame_.timelineViewport.bottom);
+    if (top >= viewportBottom || titleTop + titleH <= viewportTop || width <= 20) {
+        HideCalendarEditors();
+        return;
+    }
+
+    MoveWindow(calendarStartEdit_, left, top, timeW, timeH, TRUE);
+    MoveWindow(calendarEndEdit_, left + timeW + gap, top, timeW, timeH, TRUE);
+    MoveWindow(calendarTitleEdit_, left, titleTop, width, titleH, TRUE);
+    ShowWindow(calendarStartEdit_, SW_SHOW);
+    ShowWindow(calendarEndEdit_, SW_SHOW);
+    ShowWindow(calendarTitleEdit_, SW_SHOW);
+}
+
+void MainWindow::OnCalendarEditChanged(HWND edit) {
+    if (calendarSyncing_ || !calendarEditing()) return;
+    if (edit == calendarTitleEdit_) {
+        calendar_.SetBlockTitle(calendarEditId_, ReadWindowText(calendarTitleEdit_));
+        ScheduleSave();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+    if (edit == calendarStartEdit_ || edit == calendarEndEdit_) {
+        CommitCalendarTimeEdit(edit, false);
+    }
+}
+
+void MainWindow::CommitCalendarTimeEdit(HWND edit, bool syncText) {
+    if (!calendarEditing() || !edit) return;
+    CalendarBlock* block = calendar_.FindBlock(calendarEditId_);
+    if (!block) return;
+    int minute = 0;
+    if (!GuiCalendar::ParseTimeText(ReadWindowText(edit), minute)) return;
+
+    int start = block->startMinute;
+    int end = block->endMinute;
+    if (edit == calendarStartEdit_) {
+        int duration = end - start;
+        if (duration < 1) duration = 1;
+        start = minute;
+        end = start + duration;
+        if (end > 1440) {
+            end = 1440;
+            start = end - duration;
+        }
+        if (start < 0) start = 0;
+    } else if (edit == calendarEndEdit_) {
+        end = minute;
+        if (end <= start) end = start + 1;
+        if (end > 1440) end = 1440;
+    }
+
+    if (calendar_.SetBlockRange(calendarEditId_, start, end)) {
+        BuildCalendarBlockRects();
+        LayoutCalendarEditControls();
+        if (syncText) SyncCalendarEditors();
+        ScheduleSave();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    }
+}
+
+bool MainWindow::CalendarBlockTitleEmpty(int blockId) const {
+    const CalendarBlock* block = calendar_.FindBlock(blockId);
+    if (!block) return true;
+    return Trim(block->title).empty();
+}
+
+void MainWindow::ResetCalendarDrag() {
+    calendarDrag_ = CalendarDragState{};
+}
+
+void MainWindow::CancelCalendarCapture() {
+    if (calendarDrag_.mode == CalendarDragMode::Creating && CalendarBlockTitleEmpty(calendarDrag_.blockId)) {
+        calendar_.RemoveBlock(calendarDrag_.blockId);
+        BuildCalendarBlockRects();
+    }
+    ResetCalendarDrag();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+LRESULT CALLBACK MainWindow::CalendarEditProcStatic(HWND h, UINT m, WPARAM w, LPARAM l,
+                                                    UINT_PTR id, DWORD_PTR ref) {
+    (void)id;
+    MainWindow* self = reinterpret_cast<MainWindow*>(ref);
+    switch (m) {
+    case WM_GETDLGCODE:
+        return DefSubclassProc(h, m, w, l) | DLGC_WANTALLKEYS;
+    case WM_KEYDOWN:
+        if (w == VK_ESCAPE) {
+            self->EndCalendarEdit(true);
+            return 0;
+        }
+        if (w == VK_RETURN) {
+            if (h == self->calendarStartEdit_ || h == self->calendarEndEdit_)
+                self->CommitCalendarTimeEdit(h, true);
+            self->EndCalendarEdit(true);
+            return 0;
+        }
+        break;
+    case WM_CHAR:
+        if (w == L'\r' || w == 0x1B) return 0;
+        break;
+    case WM_KILLFOCUS: {
+        HWND next = reinterpret_cast<HWND>(w);
+        if (h == self->calendarStartEdit_ || h == self->calendarEndEdit_)
+            self->CommitCalendarTimeEdit(h, true);
+        if (next == self->calendarTitleEdit_ || next == self->calendarStartEdit_ || next == self->calendarEndEdit_)
+            break;
+        self->EndCalendarEdit(true);
+        return 0;
+    }
+    }
+    return DefSubclassProc(h, m, w, l);
 }
 
 // ——————————————————————————— 行内编辑 ———————————————————————————
@@ -988,7 +1625,8 @@ void MainWindow::CancelEdit() {
 }
 
 void MainWindow::MaybeCollapseCapsule() {
-    if (mountMode_ != MountMode::Capsule || !capsuleExpanded_ || animActive_ || editing()) return;
+    if (mountMode_ != MountMode::Capsule || !capsuleExpanded_ || animActive_ ||
+        editing() || calendarEditing()) return;
     POINT cur;
     GetCursorPos(&cur);
     RECT wr;

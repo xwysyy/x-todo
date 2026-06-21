@@ -14,14 +14,21 @@ struct TitleButtons {
     Gui::Rect menu;
 };
 
+enum class TabKind {
+    List,
+    Calendar,
+};
+
 struct TabMetric {
     int listIndex = -1;
     std::size_t titleLength = 0;
     int activeCount = 0;
+    TabKind kind = TabKind::List;
 };
 
 struct TabRect {
     int listIndex = -1;
+    TabKind kind = TabKind::List;
     Gui::Rect rect;
 };
 
@@ -56,6 +63,7 @@ enum class ChromeHit {
     Close,
     AddList,
     ListTab,
+    CalendarTab,
 };
 
 struct ChromeHitResult {

@@ -73,7 +73,7 @@ std::wstring Store::DataFilePath() {
     return dir + L"\\data.txt";
 }
 
-LoadResult Store::Load(TodoModel& model, WindowGeometry& geom, UiState& ui) {
+LoadResult Store::Load(TodoModel& model, CalendarModel& calendar, WindowGeometry& geom, UiState& ui) {
     std::wstring path = DataFilePath();
     if (path.empty()) return LoadResult::Missing;
 
@@ -94,12 +94,13 @@ LoadResult Store::Load(TodoModel& model, WindowGeometry& geom, UiState& ui) {
         return LoadResult::Failed;
     }
 
-    StoreFormat::ParseText(text, model, geom, ui);
+    StoreFormat::ParseText(text, model, calendar, geom, ui);
     return LoadResult::Loaded;
 }
 
-bool Store::Save(const TodoModel& model, const WindowGeometry& geom, const UiState& ui) {
+bool Store::Save(const TodoModel& model, const CalendarModel& calendar,
+                 const WindowGeometry& geom, const UiState& ui) {
     std::wstring path = DataFilePath();
     if (path.empty()) return false;
-    return WriteAllBytesAtomic(path, WideToUtf8(StoreFormat::SerializeText(model, geom, ui)));
+    return WriteAllBytesAtomic(path, WideToUtf8(StoreFormat::SerializeText(model, calendar, geom, ui)));
 }

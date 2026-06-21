@@ -5,6 +5,7 @@
 #include <shellapi.h>
 #include <string>
 #include <vector>
+#include "CalendarLayout.h"
 #include "TodoModel.h"
 #include "Store.h"
 #include "I18n.h"
@@ -22,6 +23,8 @@ enum class CapsuleStyle { Slim, Dot };
 
 // 胶囊吸附的屏幕竖边
 enum class DockEdge { Left, Right };
+
+enum class MainView { Lists, Calendar };
 
 // 桌面便签主窗口：无边框、Direct2D 自绘、托盘常驻。
 class MainWindow {
@@ -63,7 +66,30 @@ private:
         int listIndex = -1;
         D2D1_RECT_F rect{};
     };
-    enum class HitKind { None, TreeToggle, Check, Text, Delete, Handle, Section, Clear, EmptyActive, ListTab, AddList, Pin, Close, Menu, Theme };
+    enum class HitKind {
+        None,
+        TreeToggle,
+        Check,
+        Text,
+        Delete,
+        Handle,
+        Section,
+        Clear,
+        EmptyActive,
+        CalendarTab,
+        ListTab,
+        AddList,
+        CalendarPrevDay,
+        CalendarNextDay,
+        CalendarEmptyTimeline,
+        CalendarBlock,
+        CalendarResizeStart,
+        CalendarResizeEnd,
+        Pin,
+        Close,
+        Menu,
+        Theme
+    };
     struct Hit { HitKind kind = HitKind::None; int rowIndex = -1; int itemIndex = -1; };
 
     void  RebuildLayout();
@@ -80,6 +106,7 @@ private:
     void DrawCheckbox(const D2D1_RECT_F& box, bool checked);
     void DrawTitleBar();
     void DrawListTabs();
+    void DrawCalendarView(float windowWidth, float windowHeight);
     void DrawSection(); // 已完成折叠条（内容层，文档坐标）
     void DrawEmptyActivePrompt(bool hovered); // 当前列表没有未完成项时的点击入口
     void FillRect(const D2D1_RECT_F& r, uint32_t rgb, float a = 1.0f);
@@ -109,6 +136,29 @@ private:
     int  PreviousVisibleActiveItem(int itemIndex) const;
     bool editing() const { return editIndex_ >= 0; }
     static LRESULT CALLBACK EditProcStatic(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
+
+    // —— 日历编辑（独立顶层标签页，不影响 TodoModel 当前列表）——
+    void EnsureCalendarDay();
+    void SetActiveView(MainView view);
+    void SwitchCalendarDay(int deltaDays);
+    bool calendarActive() const { return activeView_ == MainView::Calendar; }
+    bool calendarEditing() const { return calendarEditId_ >= 0; }
+    void ClampCalendarScroll();
+    void AlignCalendarScrollToNow(bool force);
+    void BuildCalendarBlockRects();
+    void BeginCalendarEdit(int blockId, bool selectTitle);
+    void EndCalendarEdit(bool removeEmpty);
+    void HideCalendarEditors();
+    void EnsureCalendarEditors();
+    void SyncCalendarEditors();
+    void LayoutCalendarEditControls();
+    void OnCalendarEditChanged(HWND edit);
+    void CommitCalendarTimeEdit(HWND edit, bool syncText);
+    bool CalendarBlockTitleEmpty(int blockId) const;
+    void ResetCalendarDrag();
+    void CancelCalendarCapture();
+    std::string OffsetCalendarDayKey(int deltaDays) const;
+    static LRESULT CALLBACK CalendarEditProcStatic(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
 
     // —— 托盘 ——
     bool  AddTrayIcon();
@@ -199,6 +249,7 @@ private:
     ID2D1SolidColorBrush*  brush_       = nullptr;
 
     TodoModel      model_;
+    CalendarModel  calendar_;
     WindowGeometry geom_;
     UiState        ui_;
 
@@ -210,6 +261,12 @@ private:
 
     std::vector<RowLayout> rows_;
     std::vector<ListTabLayout> listTabs_;
+    MainView    activeView_ = MainView::Lists;
+    std::string calendarDay_;
+    GuiCalendar::Frame calendarFrame_{};
+    std::vector<GuiCalendar::BlockRect> calendarBlockRects_;
+    float       calendarScroll_ = 0.0f;
+    bool        calendarScrollInitialized_ = false;
     float       scroll_       = 0.0f;
     float       contentH_     = 0.0f;
     float       activeEndY_   = 0.0f; // 未完成段末尾 y，用于拖拽插入线
@@ -221,6 +278,7 @@ private:
     D2D1_RECT_F menuRect_{};    // 标题栏菜单按钮（固定）
     D2D1_RECT_F themeRect_{};   // 标题栏皮肤按钮（固定）
     D2D1_RECT_F addListRect_{}; // 标签栏新增按钮（固定）
+    D2D1_RECT_F calendarTabRect_{}; // 固定日历标签
 
     int   hoverRow_   = -1;
     int   editIndex_  = -1;
@@ -229,6 +287,17 @@ private:
     float dragY_      = 0.0f;
     int   dragInsert_ = -1;
     Hit   pressHit_;
+
+    enum class CalendarDragMode { None, PendingCreate, PendingBlock, Creating, Moving, ResizingStart, ResizingEnd };
+    struct CalendarDragState {
+        CalendarDragMode mode = CalendarDragMode::None;
+        int blockId = -1;
+        int anchorMinute = 0;
+        int originalStart = 0;
+        int originalEnd = 0;
+        float startX = 0.0f;
+        float startY = 0.0f;
+    } calendarDrag_;
 
     NOTIFYICONDATAW nid_{};
     bool trayAdded_ = false;
@@ -244,6 +313,7 @@ private:
     bool      capsuleDragging_ = false;  // 折叠胶囊：已越过阈值进入拖动
     bool      capsuleHover_    = false;  // 折叠胶囊：鼠标悬停视觉提示
     bool      menuOpen_        = false;  // 弹出菜单存活期间：抑制 WM_MOUSELEAVE 误触收缩
+    bool      calendarSyncing_ = false;  // 同步日历编辑框文本时抑制 EN_CHANGE 写回
     int       layeredMode_     = 0;      // 0=none, 1=constant alpha, 2=per-pixel alpha
     POINT     capsulePressClient_{};     // 按下点（客户坐标，拖动时窗口跟随）
     POINT     capsulePressScreen_{};     // 按下点（屏幕坐标，阈值判定）
@@ -260,4 +330,8 @@ private:
 
     HFONT  editFont_ = nullptr; // 行内编辑框字体
     HBRUSH editBg_   = nullptr; // 行内编辑框背景刷（贴合纸张色）
+    HWND   calendarTitleEdit_ = nullptr;
+    HWND   calendarStartEdit_ = nullptr;
+    HWND   calendarEndEdit_ = nullptr;
+    int    calendarEditId_ = -1;
 };

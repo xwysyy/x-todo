@@ -13,6 +13,8 @@ enum class Str {
     Autostart,    // 开机自启
     ToggleLang,   // 语言切换项（显示目标语言名）
     Exit,         // 退出
+    Calendar,     // 日历标签
+    AllDay,       // 全天行
     EmptyListTitle,// 当前列表为空
     EmptyActivePrompt,// 点击创建第一条
     ListNamePrompt,// 标签页名称输入提示

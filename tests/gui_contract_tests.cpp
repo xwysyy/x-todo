@@ -1,4 +1,5 @@
 #include "EditIntent.h"
+#include "CalendarLayout.h"
 #include "GeometryPolicy.h"
 #include "MenuModel.h"
 #include "Theme.h"
@@ -173,13 +174,14 @@ void TitleButtonLayoutOrdersActionsAndStaysInsideWindow() {
 }
 
 void ChromeHitTestCoversTitleButtonsTabsAndAddList() {
-    const GuiLayout::TitleButtons title = GuiLayout::ComputeTitleButtons(260.0f, 1.0f);
+    const GuiLayout::TitleButtons title = GuiLayout::ComputeTitleButtons(360.0f, 1.0f);
     const std::vector<GuiLayout::TabMetric> metrics = {
+        GuiLayout::TabMetric{ -1, 2, 0, GuiLayout::TabKind::Calendar },
         GuiLayout::TabMetric{ 0, 5, 2 },
         GuiLayout::TabMetric{ 1, 12, 0 },
     };
-    const GuiLayout::TabStrip strip = GuiLayout::ComputeTabStrip(260.0f, 1.0f, metrics);
-    EXPECT_EQ(strip.tabs.size(), static_cast<size_t>(2));
+    const GuiLayout::TabStrip strip = GuiLayout::ComputeTabStrip(360.0f, 1.0f, metrics);
+    EXPECT_EQ(strip.tabs.size(), static_cast<size_t>(3));
 
     GuiLayout::ChromeHitResult hit = GuiLayout::HitTestChrome(
         Mid(title.menu.left, title.menu.right), Mid(title.menu.top, title.menu.bottom),
@@ -192,8 +194,14 @@ void ChromeHitTestCoversTitleButtonsTabsAndAddList() {
     EXPECT_EQ(hit.kind, GuiLayout::ChromeHit::AddList);
 
     hit = GuiLayout::HitTestChrome(
-        Mid(strip.tabs[1].rect.left, strip.tabs[1].rect.right),
-        Mid(strip.tabs[1].rect.top, strip.tabs[1].rect.bottom),
+        Mid(strip.tabs[0].rect.left, strip.tabs[0].rect.right),
+        Mid(strip.tabs[0].rect.top, strip.tabs[0].rect.bottom),
+        1.0f, title, strip.addList, strip.tabs);
+    EXPECT_EQ(hit.kind, GuiLayout::ChromeHit::CalendarTab);
+
+    hit = GuiLayout::HitTestChrome(
+        Mid(strip.tabs[2].rect.left, strip.tabs[2].rect.right),
+        Mid(strip.tabs[2].rect.top, strip.tabs[2].rect.bottom),
         1.0f, title, strip.addList, strip.tabs);
     EXPECT_EQ(hit.kind, GuiLayout::ChromeHit::ListTab);
     EXPECT_EQ(hit.listIndex, 1);
@@ -350,6 +358,56 @@ void ThemeMenuBuildsStableCommandRangesAndCustomCap() {
     EXPECT_TRUE(HasCommand(menu, GuiMenu::kCmdThemeManager));
 }
 
+void CalendarLayoutSnapsDragCreationAndParsesMinutePrecision() {
+    const GuiCalendar::Frame frame = GuiCalendar::ComputeFrame(320.0f, 500.0f, 1.0f);
+    EXPECT_EQ(GuiCalendar::SnapMinute(9 * 60 + 7), 9 * 60);
+    EXPECT_EQ(GuiCalendar::SnapMinute(9 * 60 + 8), 9 * 60 + 15);
+    EXPECT_FALSE(GuiCalendar::DragExceeded(20.0f, 20.0f, 24.0f, 24.0f, 1.0f));
+    EXPECT_TRUE(GuiCalendar::DragExceeded(20.0f, 20.0f, 20.0f, 29.0f, 1.0f));
+
+    const int start = GuiCalendar::MinuteFromPoint(frame.timelineViewport.top, 0.0f, frame);
+    const int end = GuiCalendar::MinuteFromPoint(frame.timelineViewport.top + frame.hourHeight, 0.0f, frame);
+    const GuiCalendar::TimeRange range = GuiCalendar::RangeFromDrag(start, end);
+    EXPECT_EQ(range.startMinute, 0);
+    EXPECT_EQ(range.endMinute, 60);
+
+    int minute = -1;
+    EXPECT_TRUE(GuiCalendar::ParseTimeText(L"9:07", minute));
+    EXPECT_EQ(minute, 9 * 60 + 7);
+    EXPECT_TRUE(GuiCalendar::ParseTimeText(L"24:00", minute));
+    EXPECT_EQ(minute, 1440);
+    EXPECT_FALSE(GuiCalendar::ParseTimeText(L"24:01", minute));
+    EXPECT_EQ(GuiCalendar::FormatTimeText(9 * 60 + 7), std::wstring(L"09:07"));
+}
+
+void CalendarHitTestingUsesBlockRectsAndResizeHandles() {
+    const GuiCalendar::Frame frame = GuiCalendar::ComputeFrame(320.0f, 500.0f, 1.0f);
+    const Gui::Rect rect = GuiCalendar::ComputeBlockRect(frame, 3, 9 * 60, 10 * 60);
+    const std::vector<GuiCalendar::BlockRect> blocks = {
+        GuiCalendar::BlockRect{ 3, rect },
+    };
+    const float x = Mid(rect.left, rect.right);
+    const float scroll = rect.top - 20.0f;
+    const float clientTop = frame.timelineViewport.top + rect.top - scroll;
+    const float clientMid = frame.timelineViewport.top + Mid(rect.top, rect.bottom) - scroll;
+    const float clientBottom = frame.timelineViewport.top + rect.bottom - 1.0f - scroll;
+
+    GuiCalendar::HitResult hit = GuiCalendar::HitTest(x, clientTop + 1.0f, scroll, 1.0f, frame, blocks);
+    EXPECT_EQ(hit.kind, GuiCalendar::HitKind::ResizeStart);
+    EXPECT_EQ(hit.blockId, 3);
+
+    hit = GuiCalendar::HitTest(x, clientMid, scroll, 1.0f, frame, blocks);
+    EXPECT_EQ(hit.kind, GuiCalendar::HitKind::BlockBody);
+
+    hit = GuiCalendar::HitTest(x, clientBottom, scroll, 1.0f, frame, blocks);
+    EXPECT_EQ(hit.kind, GuiCalendar::HitKind::ResizeEnd);
+
+    hit = GuiCalendar::HitTest(Mid(frame.lane.left, frame.lane.right),
+                               frame.timelineViewport.top + 4.0f,
+                               0.0f, 1.0f, frame, blocks);
+    EXPECT_EQ(hit.kind, GuiCalendar::HitKind::EmptyTimeline);
+}
+
 const TestCase kTests[] = {
     {"NonClientHitTestPrioritizesTitleButtonsOverResizeBand", NonClientHitTestPrioritizesTitleButtonsOverResizeBand},
     {"NonClientHitTestMapsEdgesCornersCaptionAndCapsule", NonClientHitTestMapsEdgesCornersCaptionAndCapsule},
@@ -366,6 +424,8 @@ const TestCase kTests[] = {
     {"TitleAndTrayMenusDoNotExposeListManagementCommands", TitleAndTrayMenusDoNotExposeListManagementCommands},
     {"ListTabMenuOwnsRenameAndDeletePolicy", ListTabMenuOwnsRenameAndDeletePolicy},
     {"ThemeMenuBuildsStableCommandRangesAndCustomCap", ThemeMenuBuildsStableCommandRangesAndCustomCap},
+    {"CalendarLayoutSnapsDragCreationAndParsesMinutePrecision", CalendarLayoutSnapsDragCreationAndParsesMinutePrecision},
+    {"CalendarHitTestingUsesBlockRectsAndResizeHandles", CalendarHitTestingUsesBlockRectsAndResizeHandles},
 };
 
 } // namespace

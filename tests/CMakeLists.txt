@@ -35,6 +35,7 @@ add_xtodo_test(xtodo_model_regression_tests
 add_xtodo_test(xtodo_store_format_tests
     store_format_tests.cpp
     ../src/StoreFormat.cpp
+    ../src/CalendarModel.cpp
     ../src/TodoModel.cpp
 )
 
@@ -55,6 +56,8 @@ add_xtodo_test(xtodo_i18n_tests
 add_xtodo_test(xtodo_gui_contract_tests
     gui_contract_tests.cpp
     ../src/EditIntent.cpp
+    ../src/CalendarLayout.cpp
+    ../src/CalendarModel.cpp
     ../src/GeometryPolicy.cpp
     ../src/MenuModel.cpp
     ../src/ViewLayout.cpp

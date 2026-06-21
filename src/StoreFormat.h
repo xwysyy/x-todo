@@ -14,9 +14,11 @@ std::wstring Unescape(const std::wstring& in);
 // Parses already-decoded UTF-16/UTF-32 text. Corruption detection (for example, a
 // non-empty file that does not start with XTODO) remains in Store::Load because it
 // controls backup behavior.
-bool ParseText(const std::wstring& text, TodoModel& model, WindowGeometry& geom, UiState& ui);
+bool ParseText(const std::wstring& text, TodoModel& model, CalendarModel& calendar,
+               WindowGeometry& geom, UiState& ui);
 
 // Serializes the current model and UI state to the latest on-disk format.
-std::wstring SerializeText(const TodoModel& model, const WindowGeometry& geom, const UiState& ui);
+std::wstring SerializeText(const TodoModel& model, const CalendarModel& calendar,
+                           const WindowGeometry& geom, const UiState& ui);
 
 } // namespace StoreFormat
