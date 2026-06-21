@@ -16,6 +16,9 @@ enum class Str {
     NewItem,      // ＋ 新增一条
     ListNamePrompt,// 标签页名称输入提示
     ListDefault,  // 默认标签名
+    ListRename,   // 重命名标签页
+    ListDelete,   // 删除标签页
+    ListDeleteMsg,// 删除标签页确认正文
     Completed,    // 已完成
     Clear,        // 清空
     DeleteItemMsg,// 删除确认正文

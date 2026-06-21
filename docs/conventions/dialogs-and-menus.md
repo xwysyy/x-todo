@@ -99,6 +99,11 @@ Switching lists and creating a list belong to the main window's tab strip;
 the menu surfaces are for window mode, capsule style, language, autostart,
 theme, and exit commands only.
 
+List-tab management stays on the tab strip itself. Double-clicking a list tab
+renames it; right-clicking a list tab opens that tab's context menu for rename
+and delete. This tab context menu does not add list commands back to the
+title-bar or tray menus.
+
 ### Keep menu hit-testing in lockstep with painting
 
 Symptom: clicking a menu row could select a neighboring row or no row at

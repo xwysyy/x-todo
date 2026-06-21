@@ -55,6 +55,7 @@ Open [Releases](https://github.com/xwysyy/X-TODO/releases), download `x-todo.exe
 | Edit | Click the item text and type |
 | Indent / outdent | Edit an active item, then press Tab or Shift+Tab |
 | Collapse children | Click the disclosure arrow on a parent item |
+| Rename / delete list | Double-click a list tab to rename it, or right-click a tab for rename/delete |
 | Delete | Hover an item, click ×, confirm; child items are deleted with it |
 | Reorder | Drag the handle on the right of an item; child items move with it |
 | Move / resize | Drag the title bar to move, drag the edges to resize |

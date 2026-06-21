@@ -809,6 +809,20 @@ void MainWindow::OnLButtonUp(float x, float y) {
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
+void MainWindow::OnLButtonDoubleClick(float x, float y) {
+    if (animActive_ || capsuleShrunk()) return;
+    if (editing()) CommitEdit(false);
+    Hit h = HitTest(x, y);
+    if (h.kind == HitKind::ListTab) RenameList(h.itemIndex);
+}
+
+void MainWindow::OnRButtonUp(float x, float y) {
+    if (animActive_ || capsuleShrunk()) return;
+    if (editing()) CommitEdit(false);
+    Hit h = HitTest(x, y);
+    if (h.kind == HitKind::ListTab) ShowListTabMenu(h.itemIndex, x, y);
+}
+
 void MainWindow::OnMouseMove(float x, float y, bool lButton) {
     if (capsulePressing_) { UpdateCapsulePress(lButton); return; } // 胶囊按压：判定拖动并跟随
     if (dragging_) {

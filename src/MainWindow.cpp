@@ -38,6 +38,8 @@ constexpr UINT kCmdThemeFollowSystem = 1000;
 constexpr UINT kCmdThemeBuiltinBase  = 1100; // + 内置主题索引
 constexpr UINT kCmdThemeCustomBase   = 1300; // + 自定义主题索引
 constexpr UINT kCmdThemeManager      = 1900;
+constexpr UINT kCmdListRename        = 2000;
+constexpr UINT kCmdListDelete        = 2001;
 
 template <class T> void SafeRelease(T** p) {
     if (*p) { (*p)->Release(); *p = nullptr; }
@@ -1415,6 +1417,14 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
         if (GetCapture() == hwnd_) ReleaseCapture(); // 先处理逻辑松手再释放，避免自触发 WM_CAPTURECHANGED 误清状态
         return 0;
 
+    case WM_LBUTTONDBLCLK:
+        OnLButtonDoubleClick((float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp));
+        return 0;
+
+    case WM_RBUTTONUP:
+        OnRButtonUp((float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp));
+        return 0;
+
     case WM_MOUSEMOVE: {
         TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd_, 0 };
         TrackMouseEvent(&tme);
@@ -1748,6 +1758,26 @@ void MainWindow::ShowThemeMenu() {
     if (cmd != 3) MaybeCollapseCapsule();
 }
 
+void MainWindow::ShowListTabMenu(int index, float x, float y) {
+    if (!model_.ListAt(index)) return;
+    std::vector<PopupMenuItem> items{
+        PopupMenuItem{ kCmdListRename, T(Str::ListRename, lang_) },
+        PopupMenuItem{ 0, L"", true },
+        PopupMenuItem{ kCmdListDelete, T(Str::ListDelete, lang_), false, false,
+                       true, model_.ListCount() > 1 },
+    };
+
+    POINT pt{ (LONG)x, (LONG)y };
+    ClientToScreen(hwnd_, &pt);
+    menuOpen_ = true;
+    UINT cmd = ShowPopupMenu(hwnd_, pt, items, false, theme_, d2dFactory_, dwrite_);
+    menuOpen_ = false;
+
+    if (cmd == kCmdListRename) RenameList(index);
+    else if (cmd == kCmdListDelete) DeleteList(index);
+    MaybeCollapseCapsule();
+}
+
 void MainWindow::SetLanguage(Lang lang) {
     if (lang == lang_) return;
     lang_ = lang;
@@ -1785,6 +1815,39 @@ void MainWindow::CreateList() {
     dragFrom_ = dragInsert_ = -1;
     RebuildLayout();
     ClampScroll();
+    ScheduleSave();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void MainWindow::RenameList(int index) {
+    const TodoList* list = model_.ListAt(index);
+    if (!list) return;
+    if (editing()) CommitEdit(false);
+
+    std::wstring title = list->title;
+    if (!PromptText(T(Str::ListNamePrompt, lang_), title)) return;
+    if (!model_.RenameList(index, title)) return;
+
+    RebuildLayout();
+    ScheduleSave();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void MainWindow::DeleteList(int index) {
+    if (model_.ListCount() <= 1) return;
+    if (!model_.ListAt(index)) return;
+    if (editing()) CommitEdit(false);
+    if (!Confirm(Str::ListDeleteMsg, MB_ICONWARNING)) return;
+
+    const bool deletingCurrent = index == model_.CurrentListIndex();
+    if (!model_.RemoveList(index)) return;
+    if (deletingCurrent) scroll_ = 0.0f;
+    hoverRow_ = -1;
+    dragging_ = false;
+    dragFrom_ = dragInsert_ = -1;
+    RebuildLayout();
+    ClampScroll();
+    RefreshTrayIcon();
     ScheduleSave();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }

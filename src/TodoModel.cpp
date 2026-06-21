@@ -245,6 +245,31 @@ int TodoModel::AddList(const std::wstring& title) {
     return currentList_;
 }
 
+bool TodoModel::RenameList(int index, const std::wstring& title) {
+    EnsureList();
+    if (index < 0 || index >= static_cast<int>(lists_.size())) return false;
+    if (title.empty()) return false;
+    lists_[(size_t)index].title = title;
+    return true;
+}
+
+bool TodoModel::RemoveList(int index) {
+    EnsureList();
+    if (lists_.size() <= 1) return false;
+    if (index < 0 || index >= static_cast<int>(lists_.size())) return false;
+
+    lists_.erase(lists_.begin() + index);
+    if (currentList_ == index) {
+        currentList_ = index;
+        if (currentList_ >= static_cast<int>(lists_.size()))
+            currentList_ = static_cast<int>(lists_.size()) - 1;
+    } else if (currentList_ > index) {
+        --currentList_;
+    }
+    EnsureList();
+    return true;
+}
+
 bool TodoModel::SetCurrentListIndex(int index) {
     EnsureList();
     if (index < 0 || index >= static_cast<int>(lists_.size())) return false;

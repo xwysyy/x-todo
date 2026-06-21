@@ -16,6 +16,10 @@ const wchar_t* T(Str key, Lang lang) {
         case Str::NewItem:       return zh ? L"＋ 新增一条"     : L"＋ New item";
         case Str::ListNamePrompt:return zh ? L"标签页名称"      : L"List name";
         case Str::ListDefault:   return zh ? L"默认"            : L"Inbox";
+        case Str::ListRename:    return zh ? L"重命名标签页"    : L"Rename list";
+        case Str::ListDelete:    return zh ? L"删除标签页"      : L"Delete list";
+        case Str::ListDeleteMsg: return zh ? L"删除这个标签页及其中所有待办？此操作不可撤销。"
+                                           : L"Delete this list and all its items? This cannot be undone.";
         case Str::Completed:     return zh ? L"已完成"          : L"Completed";
         case Str::Clear:         return zh ? L"清空"            : L"Clear";
         case Str::DeleteItemMsg: return zh ? L"删除这一条？"    : L"Delete this item?";

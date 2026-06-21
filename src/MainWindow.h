@@ -94,6 +94,8 @@ private:
     // —— 输入 ——
     void    OnLButtonDown(float x, float y);
     void    OnLButtonUp(float x, float y);
+    void    OnLButtonDoubleClick(float x, float y);
+    void    OnRButtonUp(float x, float y);
     void    OnMouseMove(float x, float y, bool lButton);
     void    OnMouseLeave();
     void    OnMouseWheel(int delta);
@@ -120,6 +122,9 @@ private:
     void  SetLanguage(Lang lang);
     void  SwitchList(int index);
     void  CreateList();
+    void  RenameList(int index);
+    void  DeleteList(int index);
+    void  ShowListTabMenu(int index, float x, float y);
 
     // —— 主题 ——
     void ReloadThemes();                   // 重扫 %APPDATA%\x-todo\themes\ 自定义主题目录

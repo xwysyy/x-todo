@@ -55,6 +55,8 @@ public:
     const TodoList& CurrentList() const;
     const TodoList* ListAt(int index) const;
     int AddList(const std::wstring& title);
+    bool RenameList(int index, const std::wstring& title);
+    bool RemoveList(int index);
     bool SetCurrentListIndex(int index);
     bool SetCurrentListId(const std::string& id);
     void SetCurrentCompletedExpanded(bool expanded);
