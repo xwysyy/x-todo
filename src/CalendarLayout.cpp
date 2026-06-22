@@ -87,14 +87,14 @@ EditLayout ComputeEditLayout(const Gui::Rect& blockRect, float dpiScale) {
     EditLayout out;
     out.block = blockRect;
 
-    const float minH = S(68.0f, dpiScale);
+    const float minH = S(76.0f, dpiScale);
     if (out.block.bottom < out.block.top + minH) out.block.bottom = out.block.top + minH;
 
     const float padX = S(8.0f, dpiScale);
     const float padTop = S(7.0f, dpiScale);
-    const float frameInset = S(1.0f, dpiScale);
-    const float titleH = S(24.0f, dpiScale);
-    const float timeH = S(24.0f, dpiScale);
+    const float frameInset = S(4.0f, dpiScale);
+    const float titleH = S(26.0f, dpiScale);
+    const float timeH = S(26.0f, dpiScale);
     const float gapY = S(8.0f, dpiScale);
     const float gapX = S(10.0f, dpiScale);
     const float minTimeW = S(44.0f, dpiScale);

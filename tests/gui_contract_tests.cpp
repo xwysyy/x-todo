@@ -32,6 +32,17 @@ const GuiMenu::Item* FindCommand(const std::vector<GuiMenu::Item>& items, GuiMen
     return nullptr;
 }
 
+void ExpectChildControlLeavesRoundedFrameSafeArea(const Gui::Rect& frame,
+                                                  const Gui::Rect& child,
+                                                  float minInset) {
+    EXPECT_TRUE(child.left >= frame.left + minInset);
+    EXPECT_TRUE(child.top >= frame.top + minInset);
+    EXPECT_TRUE(child.right <= frame.right - minInset);
+    EXPECT_TRUE(child.bottom <= frame.bottom - minInset);
+    EXPECT_TRUE(child.Width() > 0.0f);
+    EXPECT_TRUE(child.Height() > 0.0f);
+}
+
 GuiHit::Input BaseHitInput() {
     GuiHit::Input input;
     input.width = 260.0f;
@@ -450,18 +461,12 @@ void CalendarEditLayoutSeparatesFieldsAndChildEdits() {
     EXPECT_TRUE(layout.titleEdit.right < layout.titleFrame.right);
     EXPECT_TRUE(layout.titleEdit.top > layout.titleFrame.top);
     EXPECT_TRUE(layout.titleEdit.bottom < layout.titleFrame.bottom);
-    EXPECT_TRUE(layout.titleEdit.Width() >= layout.titleFrame.Width() - 3.0f);
-    EXPECT_TRUE(layout.titleEdit.Height() >= layout.titleFrame.Height() - 3.0f);
 
     EXPECT_TRUE(layout.startFrame.left == layout.titleFrame.left);
     EXPECT_TRUE(layout.startFrame.right < layout.endFrame.left);
     EXPECT_TRUE(layout.endFrame.right <= layout.titleFrame.right);
     EXPECT_TRUE(layout.startEdit.left > layout.startFrame.left);
     EXPECT_TRUE(layout.endEdit.right < layout.endFrame.right);
-    EXPECT_TRUE(layout.startEdit.Width() >= layout.startFrame.Width() - 3.0f);
-    EXPECT_TRUE(layout.startEdit.Height() >= layout.startFrame.Height() - 3.0f);
-    EXPECT_TRUE(layout.endEdit.Width() >= layout.endFrame.Width() - 3.0f);
-    EXPECT_TRUE(layout.endEdit.Height() >= layout.endFrame.Height() - 3.0f);
 
     EXPECT_EQ(GuiCalendar::HitTestEditField(Mid(layout.titleFrame.left, layout.titleFrame.right),
                                             Mid(layout.titleFrame.top, layout.titleFrame.bottom),
@@ -493,6 +498,30 @@ void CalendarEditLayoutSeparatesFieldsAndChildEdits() {
     EXPECT_EQ(fieldRect.left, layout.startFrame.left);
     EXPECT_TRUE(GuiCalendar::EditFieldControlRect(layout, GuiCalendar::EditField::EndTime, fieldRect));
     EXPECT_EQ(fieldRect.left, layout.endEdit.left);
+}
+
+void CalendarChildEditorsLeaveRoundedFrameSafeArea() {
+    const GuiCalendar::Frame frame = GuiCalendar::ComputeFrame(320.0f, 500.0f, 1.0f);
+    const Gui::Rect block = GuiCalendar::ComputeBlockRect(frame, 3, 9 * 60, 9 * 60 + 15);
+    const GuiCalendar::EditLayout layout = GuiCalendar::ComputeEditLayout(block, 1.0f);
+    const float minChildInset = 4.0f;
+
+    ExpectChildControlLeavesRoundedFrameSafeArea(layout.titleFrame, layout.titleEdit, minChildInset);
+    ExpectChildControlLeavesRoundedFrameSafeArea(layout.startFrame, layout.startEdit, minChildInset);
+    ExpectChildControlLeavesRoundedFrameSafeArea(layout.endFrame, layout.endEdit, minChildInset);
+
+    EXPECT_EQ(GuiCalendar::HitTestEditField(layout.titleFrame.left + 1.0f,
+                                            Mid(layout.titleFrame.top, layout.titleFrame.bottom),
+                                            layout),
+              GuiCalendar::EditField::Title);
+    EXPECT_EQ(GuiCalendar::HitTestEditField(layout.startFrame.left + 1.0f,
+                                            Mid(layout.startFrame.top, layout.startFrame.bottom),
+                                            layout),
+              GuiCalendar::EditField::StartTime);
+    EXPECT_EQ(GuiCalendar::HitTestEditField(layout.endFrame.left + 1.0f,
+                                            Mid(layout.endFrame.top, layout.endFrame.bottom),
+                                            layout),
+              GuiCalendar::EditField::EndTime);
 }
 
 void CalendarTimeRangeParsingIsAtomicAndStrict() {
@@ -531,6 +560,7 @@ const TestCase kTests[] = {
     {"CalendarHitTestingUsesBlockRectsAndResizeHandles", CalendarHitTestingUsesBlockRectsAndResizeHandles},
     {"CalendarHeaderButtonsLayout", CalendarHeaderButtonsLayout},
     {"CalendarEditLayoutSeparatesFieldsAndChildEdits", CalendarEditLayoutSeparatesFieldsAndChildEdits},
+    {"CalendarChildEditorsLeaveRoundedFrameSafeArea", CalendarChildEditorsLeaveRoundedFrameSafeArea},
     {"CalendarTimeRangeParsingIsAtomicAndStrict", CalendarTimeRangeParsingIsAtomicAndStrict},
 };
 
