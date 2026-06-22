@@ -336,7 +336,8 @@ private:
 
     HFONT  editFont_ = nullptr; // 行内编辑框字体
     HBRUSH editBg_   = nullptr; // 行内编辑框背景刷（贴合纸张色）
-    HBRUSH calendarEditBg_ = nullptr; // 日历块编辑框背景刷（字段抬升色）
+    HBRUSH   calendarEditBg_ = nullptr; // 日历块编辑框背景刷（与编辑块同色，融入不突兀）
+    uint32_t calendarEditFill_ = 0;     // 当前编辑块的填充色
     HWND   calendarTitleEdit_ = nullptr;
     HWND   calendarStartEdit_ = nullptr;
     HWND   calendarEndEdit_ = nullptr;

@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "Autostart.h"
+#include "CalendarTheme.h"
 #include "GeometryPolicy.h"
 #include "MenuModel.h"
 #include "Theme.h"
@@ -1523,13 +1524,15 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
         const HWND ctl = (HWND)lp;
         const bool cal = (ctl == calendarTitleEdit_ || ctl == calendarStartEdit_ ||
                           ctl == calendarEndEdit_);
-        const uint32_t bg = cal ? theme_.colors.paperElevated : theme_.colors.paper;
-        SetBkColor(hdc, Theme::GdiColor(bg));
-        SetTextColor(hdc, Theme::GdiColor(theme_.colors.text));
-        if (cal) {
-            if (!calendarEditBg_) calendarEditBg_ = CreateSolidBrush(Theme::GdiColor(bg));
+        if (cal && calendarEditFill_ != 0) {
+            // 编辑框与编辑块同色融入，文字用块内固定深色，不再是突兀的白底。
+            SetBkColor(hdc, Theme::GdiColor(calendarEditFill_));
+            SetTextColor(hdc, Theme::GdiColor(CalendarTheme::kBlockTitle));
+            if (!calendarEditBg_) calendarEditBg_ = CreateSolidBrush(Theme::GdiColor(calendarEditFill_));
             return (LRESULT)calendarEditBg_;
         }
+        SetBkColor(hdc, Theme::GdiColor(theme_.colors.paper));
+        SetTextColor(hdc, Theme::GdiColor(theme_.colors.text));
         if (!editBg_) editBg_ = CreateSolidBrush(Theme::GdiColor(theme_.colors.paper));
         return (LRESULT)editBg_;
     }

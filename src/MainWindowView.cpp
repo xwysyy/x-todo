@@ -861,31 +861,22 @@ void MainWindow::DrawCalendarView(float W, float H) {
             conflict ? CalendarTheme::kConflict : CalendarTheme::BlockColorAt(idx);
 
         D2D1_RECT_F r = ToD2DRect(blockRect.rect);
-        // 编辑态收成固定高度的紧凑编辑卡片：不随时间长度铺满，避免大块里浮着小输入框。
-        if (selected) r.bottom = r.top + S(72);
+        // 编辑态只保证最小高度容纳两行输入，不强行铺满或截断时间长度。
+        if (selected) {
+            const float minH = S(62);
+            if (r.bottom < r.top + minH) r.bottom = r.top + minH;
+        }
         const float radius = S(7);
         FillRoundRect(D2D1_ROUNDED_RECT{ r, radius, radius }, bc.fill);
         StrokeRoundRect(D2D1_ROUNDED_RECT{ r, radius, radius },
                         selected ? theme_.colors.focusRing : bc.edge, S(selected ? 1.6f : 1.0f));
 
         if (selected) {
-            // 输入框边框（与 LayoutCalendarEditControls 的几何对齐，文字由原生 EDIT 绘制）。
-            const float fy = S(6);   // 标题 top（对齐 LayoutCalendarEditControls）
-            const float ty = S(30);  // 时间行 top
-            auto frame = [&](float x0, float y0, float w, float hh) {
-                D2D1_RECT_F f = D2D1::RectF(r.left + x0 - S(1), r.top + y0 - S(1),
-                                            r.left + x0 + w + S(1), r.top + y0 + hh + S(1));
-                StrokeRoundRect(D2D1_ROUNDED_RECT{ f, S(5), S(5) }, theme_.colors.checkBorder, S(1));
-            };
-            const float fullW = (r.right - r.left) - S(16);
-            frame(S(8), fy, fullW, S(22));                 // 标题
-            frame(S(8), ty, S(58), S(20));                 // 开始时间
-            frame(S(8) + S(58) + S(8), ty, S(58), S(20));  // 结束时间
-            // 两个时间框之间的分隔
-            const float sepX = r.left + S(8) + S(58) + S(4);
-            const float sepY = r.top + ty + S(10);
-            brush_->SetColor(Theme::D2DColor(theme_.colors.textWeak));
-            rt_->DrawLine(D2D1::Point2F(sepX - S(3), sepY), D2D1::Point2F(sepX + S(3), sepY), brush_, S(1.3f));
+            // 输入框由原生 EDIT 以同色绘制、无边框融入块内；仅在起止时间之间画一道细分隔。
+            const float sepX = r.left + S(8) + S(56) + S(5);
+            const float sepY = r.top + S(36) + S(10);
+            brush_->SetColor(Theme::D2DColor(CalendarTheme::kBlockTime));
+            rt_->DrawLine(D2D1::Point2F(sepX - S(3), sepY), D2D1::Point2F(sepX + S(3), sepY), brush_, S(1.2f));
         } else {
             D2D1_RECT_F titleR = r;
             titleR.left += S(8);
@@ -1494,6 +1485,21 @@ void MainWindow::BeginCalendarEdit(int blockId, bool selectTitle) {
     if (editing()) CommitEdit(false);
     EnsureCalendarEditors();
     calendarEditId_ = blockId;
+
+    // 记录编辑块底色：输入框以同色融入，文字用块内固定深色。
+    {
+        const auto dayBlocks = calendar_.BlocksForDay(calendarDay_);
+        const std::vector<int> conflictIds = ConflictingBlockIds(dayBlocks);
+        int idx = 0;
+        for (size_t i = 0; i < dayBlocks.size(); ++i)
+            if (dayBlocks[i] && dayBlocks[i]->id == blockId) { idx = static_cast<int>(i); break; }
+        bool conflict = false;
+        for (int c : conflictIds) if (c == blockId) { conflict = true; break; }
+        calendarEditFill_ = conflict ? CalendarTheme::kConflict.fill
+                                     : CalendarTheme::BlockColorAt(idx).fill;
+        if (calendarEditBg_) { DeleteObject(calendarEditBg_); calendarEditBg_ = nullptr; }
+    }
+
     SyncCalendarEditors();
     LayoutCalendarEditControls();
     ShowWindow(calendarTitleEdit_, SW_SHOW);
@@ -1562,12 +1568,12 @@ void MainWindow::LayoutCalendarEditControls() {
     const float clientTop = ContentTop() + calendarFrame_.timelineViewport.top - calendarScroll_;
     const int left = RoundToInt(rect.left + S(8));
     const int width = RoundToInt(rect.right - rect.left - S(16));
-    const int titleTop = RoundToInt(clientTop + rect.top + S(6));
+    const int titleTop = RoundToInt(clientTop + rect.top + S(7));
     const int titleH = RoundToInt(S(22));
-    const int timeW = RoundToInt(S(58));
+    const int timeW = RoundToInt(S(56));
     const int timeH = RoundToInt(S(20));
-    const int gap = RoundToInt(S(8));
-    const int timeTop = RoundToInt(clientTop + rect.top + S(30));
+    const int gap = RoundToInt(S(10));
+    const int timeTop = RoundToInt(clientTop + rect.top + S(36));
 
     const int viewportTop = RoundToInt(ContentTop() + calendarFrame_.timelineViewport.top);
     const int viewportBottom = RoundToInt(ContentTop() + calendarFrame_.timelineViewport.bottom);
@@ -1590,11 +1596,9 @@ void MainWindow::OnCalendarEditChanged(HWND edit) {
         calendar_.SetBlockTitle(calendarEditId_, ReadWindowText(calendarTitleEdit_));
         ScheduleSave();
         InvalidateRect(hwnd_, nullptr, FALSE);
-        return;
     }
-    if (edit == calendarStartEdit_ || edit == calendarEndEdit_) {
-        CommitCalendarTimeEdit(edit, false);
-    }
+    // 时间字段不在每次输入时提交：回车或失焦时才提交（见 CalendarEditProcStatic），
+    // 否则刚敲到合法值块就跳走、和输入打架。
 }
 
 void MainWindow::CommitCalendarTimeEdit(HWND edit, bool syncText) {
