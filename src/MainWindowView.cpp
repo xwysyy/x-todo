@@ -863,14 +863,6 @@ void MainWindow::DrawCalendarDay(float W, float H) {
         }
     }
 
-    if (calendarDay_ == TodayDayKey()) {
-        const float y = (static_cast<float>(CurrentMinuteOfDay()) / 1440.0f) * frame.contentHeight;
-        brush_->SetColor(Theme::D2DColor(theme_.colors.focusRing));
-        rt_->DrawLine(D2D1::Point2F(frame.lane.left, y),
-                      D2D1::Point2F(frame.lane.right, y), brush_, S(1.4f));
-        rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(frame.lane.left, y), S(3), S(3)), brush_);
-    }
-
     int idx = 0;
     for (const GuiCalendar::BlockRect& blockRect : calendarBlockRects_) {
         const CalendarBlock* block = calendar_.FindBlock(blockRect.blockId);
@@ -925,6 +917,15 @@ void MainWindow::DrawCalendarDay(float W, float H) {
             Text(timeText, timeR, CalendarTheme::kBlockTime, smallFormat_);
         }
         ++idx;
+    }
+
+    // 当前时间线浮于事件块之上，避免被不透明块盖住。
+    if (calendarDay_ == TodayDayKey()) {
+        const float y = (static_cast<float>(CurrentMinuteOfDay()) / 1440.0f) * frame.contentHeight;
+        brush_->SetColor(Theme::D2DColor(theme_.colors.focusRing));
+        rt_->DrawLine(D2D1::Point2F(frame.lane.left, y),
+                      D2D1::Point2F(frame.lane.right, y), brush_, S(1.4f));
+        rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(frame.lane.left, y), S(3), S(3)), brush_);
     }
 
     rt_->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -1108,17 +1109,6 @@ void MainWindow::DrawCalendarWeek(float W, float H) {
         rt_->DrawLine(D2D1::Point2F(x, 0.0f), D2D1::Point2F(x, frame.contentHeight), brush_, S(0.75f));
     }
 
-    if (haveWeek) {
-        for (int i = 0; i < 7; ++i) {
-            if (CalendarDate::Format(CalendarDate::AddDays(weekStart, i)) != todayKey) continue;
-            const float y = (static_cast<float>(CurrentMinuteOfDay()) / 1440.0f) * frame.contentHeight;
-            brush_->SetColor(Theme::D2DColor(theme_.colors.focusRing));
-            rt_->DrawLine(D2D1::Point2F(frame.columns[(size_t)i].left, y),
-                          D2D1::Point2F(frame.columns[(size_t)i].right, y), brush_, S(1.4f));
-            break;
-        }
-    }
-
     int idx = 0;
     for (const GuiCalendar::WeekBlockRect& wb : calendarWeekBlockRects_) {
         const CalendarBlock* block = calendar_.FindBlock(wb.blockId);
@@ -1135,6 +1125,18 @@ void MainWindow::DrawCalendarWeek(float W, float H) {
         titleR.bottom = titleR.top + S(16);
         Text(block->title, titleR, CalendarTheme::kBlockTitle, smallFormat_);
         ++idx;
+    }
+
+    // 当前时间线浮于事件块之上，避免被不透明块盖住。
+    if (haveWeek) {
+        for (int i = 0; i < 7; ++i) {
+            if (CalendarDate::Format(CalendarDate::AddDays(weekStart, i)) != todayKey) continue;
+            const float y = (static_cast<float>(CurrentMinuteOfDay()) / 1440.0f) * frame.contentHeight;
+            brush_->SetColor(Theme::D2DColor(theme_.colors.focusRing));
+            rt_->DrawLine(D2D1::Point2F(frame.columns[(size_t)i].left, y),
+                          D2D1::Point2F(frame.columns[(size_t)i].right, y), brush_, S(1.4f));
+            break;
+        }
     }
 
     rt_->SetTransform(D2D1::Matrix3x2F::Identity());
