@@ -8,11 +8,44 @@
 
 namespace GuiCalendar {
 
+// ----------------------------------------------------------------------------
+// Shared calendar header (Day / Week / Month).
+//
+// Layout, left to right: a grouped prev/next nav pair, a flexible period title,
+// a connected Day|Week|Month segmented control, and an optional "back to today"
+// icon pinned to the right. The layout degrades on narrow widths by priority
+// (nav > segmented > today > title): the title shortens then hides, the today
+// icon hides, and the segmented control shrinks, while nav and segmented never
+// overlap and no rect goes negative-width.
+// ----------------------------------------------------------------------------
+
+struct HeaderLayout {
+    Gui::Rect prev;       // ‹ previous period
+    Gui::Rect next;       // › next period
+    Gui::Rect title;      // period label (only when titleVisible)
+    Gui::Rect segment;    // connected segmented container
+    Gui::Rect modeDay;    // three equal segments inside `segment`
+    Gui::Rect modeWeek;
+    Gui::Rect modeMonth;
+    Gui::Rect today;      // back-to-today icon (only when todayVisible)
+    float headerHeight = 0.0f;
+    bool titleVisible = false;
+    bool todayVisible = false;
+    bool compactTitle = false; // title area is tight; caller should use a short label
+};
+
+enum class HeaderHit { None, Prev, Next, Today, ModeDay, ModeWeek, ModeMonth };
+
+// `showToday` requests the today icon (caller passes false when already on today).
+HeaderLayout ComputeHeader(float windowWidth, float dpiScale, bool showToday);
+HeaderHit HitTestHeader(float x, float y, const HeaderLayout& header);
+
+// ----------------------------------------------------------------------------
+// Day view.
+// ----------------------------------------------------------------------------
+
 struct Frame {
-    Gui::Rect dateHeader;
-    Gui::Rect prevDay;
-    Gui::Rect nextDay;
-    Gui::Rect today;
+    HeaderLayout header;
     Gui::Rect timelineViewport;
     Gui::Rect gutter;
     Gui::Rect lane;
@@ -25,11 +58,9 @@ struct BlockRect {
     Gui::Rect rect;
 };
 
+// Day body hits only; header hits come from HitTestHeader.
 enum class HitKind {
     None,
-    PrevDay,
-    NextDay,
-    Today,
     EmptyTimeline,
     BlockBody,
     ResizeStart,
@@ -63,7 +94,7 @@ struct EditLayout {
     Gui::Rect endEdit;
 };
 
-Frame ComputeFrame(float windowWidth, float viewportHeight, float dpiScale);
+Frame ComputeFrame(float windowWidth, float viewportHeight, float dpiScale, bool showToday = true);
 Gui::Rect ComputeBlockRect(const Frame& frame, int blockId, int startMinute, int endMinute);
 HitResult HitTest(float x, float y, float scroll, float dpiScale, const Frame& frame,
                   const std::vector<BlockRect>& blocks);
@@ -84,30 +115,11 @@ bool ParseTimeRangeText(const std::wstring& startText, const std::wstring& endTe
 std::wstring FormatTimeText(int minute);
 
 // ----------------------------------------------------------------------------
-// Shared Day/Week/Month mode control. Three equal segments in the header band.
-// ----------------------------------------------------------------------------
-
-struct ModeControl {
-    Gui::Rect day;
-    Gui::Rect week;
-    Gui::Rect month;
-};
-
-enum class ModeHit { None, Day, Week, Month };
-
-ModeControl ComputeModeControl(float windowWidth, float dpiScale);
-ModeHit HitTestModeControl(float x, float y, const ModeControl& mc);
-
-// ----------------------------------------------------------------------------
 // Week view: seven day columns over one shared vertical time axis.
 // ----------------------------------------------------------------------------
 
 struct WeekFrame {
-    Gui::Rect header;
-    Gui::Rect prev;
-    Gui::Rect next;
-    Gui::Rect today;
-    ModeControl mode;
+    HeaderLayout header;
     Gui::Rect dayHeaderRow;
     Gui::Rect timelineViewport;
     Gui::Rect gutter;
@@ -117,14 +129,9 @@ struct WeekFrame {
     float contentHeight = 0.0f;
 };
 
+// Week body hits only; header hits come from HitTestHeader.
 enum class WeekHitKind {
     None,
-    Prev,
-    Next,
-    Today,
-    ModeDay,
-    ModeWeek,
-    ModeMonth,
     DayHeader,
     Block,
     EmptyColumn,
@@ -149,7 +156,8 @@ struct WeekBlockRect {
     Gui::Rect rect;
 };
 
-WeekFrame ComputeWeekFrame(float windowWidth, float viewportHeight, float dpiScale);
+WeekFrame ComputeWeekFrame(float windowWidth, float viewportHeight, float dpiScale,
+                           bool showToday = true);
 
 // Packs blocks already sorted by start, then end, then id, into deterministic
 // lanes. Returns one LaneSpan per input span, in the same order.
@@ -165,11 +173,7 @@ WeekHitResult HitTestWeek(float x, float y, float scroll, float dpiScale,
 // ----------------------------------------------------------------------------
 
 struct MonthFrame {
-    Gui::Rect header;
-    Gui::Rect prev;
-    Gui::Rect next;
-    Gui::Rect today;
-    ModeControl mode;
+    HeaderLayout header;
     Gui::Rect weekdayRow;
     std::array<Gui::Rect, 7> weekdayHeaders{};
     Gui::Rect grid;
@@ -178,14 +182,9 @@ struct MonthFrame {
     float cellHeight = 0.0f;
 };
 
+// Month body hits only; header hits come from HitTestHeader.
 enum class MonthHitKind {
     None,
-    Prev,
-    Next,
-    Today,
-    ModeDay,
-    ModeWeek,
-    ModeMonth,
     Cell,
 };
 
@@ -194,7 +193,8 @@ struct MonthHitResult {
     int cellIndex = -1;
 };
 
-MonthFrame ComputeMonthFrame(float windowWidth, float viewportHeight, float dpiScale);
+MonthFrame ComputeMonthFrame(float windowWidth, float viewportHeight, float dpiScale,
+                             bool showToday = true);
 MonthHitResult HitTestMonth(float x, float y, float dpiScale, const MonthFrame& frame);
 
 } // namespace GuiCalendar

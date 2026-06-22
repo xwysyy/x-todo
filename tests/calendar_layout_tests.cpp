@@ -12,26 +12,73 @@ float Mid(float a, float b) { return (a + b) * 0.5f; }
 
 GuiCalendar::TimeRange TR(int start, int end) { return GuiCalendar::TimeRange{ start, end }; }
 
-void ModeControlSegmentsAreEqualContiguousAndHitTestable() {
-    const GuiCalendar::ModeControl mc = GuiCalendar::ComputeModeControl(320.0f, 1.0f);
-    EXPECT_TRUE(mc.day.left < mc.week.left);
-    EXPECT_TRUE(mc.week.left < mc.month.left);
-    EXPECT_TRUE(mc.day.right <= mc.week.left + 0.5f);
-    EXPECT_TRUE(mc.week.right <= mc.month.left + 0.5f);
-    EXPECT_TRUE(std::fabs(mc.day.Width() - mc.week.Width()) < 0.5f);
-    EXPECT_TRUE(std::fabs(mc.week.Width() - mc.month.Width()) < 0.5f);
+void HeaderGroupsNavConnectsSegmentsAndPinsToday() {
+    const GuiCalendar::HeaderLayout h = GuiCalendar::ComputeHeader(700.0f, 1.0f, true);
 
-    EXPECT_TRUE(GuiCalendar::HitTestModeControl(Mid(mc.day.left, mc.day.right),
-                                                Mid(mc.day.top, mc.day.bottom), mc) ==
-                GuiCalendar::ModeHit::Day);
-    EXPECT_TRUE(GuiCalendar::HitTestModeControl(Mid(mc.week.left, mc.week.right),
-                                                Mid(mc.week.top, mc.week.bottom), mc) ==
-                GuiCalendar::ModeHit::Week);
-    EXPECT_TRUE(GuiCalendar::HitTestModeControl(Mid(mc.month.left, mc.month.right),
-                                                Mid(mc.month.top, mc.month.bottom), mc) ==
-                GuiCalendar::ModeHit::Month);
-    EXPECT_TRUE(GuiCalendar::HitTestModeControl(mc.day.left - 5.0f, mc.day.top - 80.0f, mc) ==
-                GuiCalendar::ModeHit::None);
+    // Nav is a left-aligned pair.
+    EXPECT_TRUE(h.prev.left < h.next.left);
+    EXPECT_TRUE(h.next.left >= h.prev.right - 0.5f);
+    EXPECT_TRUE(h.next.left <= h.prev.right + 6.0f);
+
+    // Segmented sits right of the nav group, with three equal contiguous parts.
+    EXPECT_TRUE(h.segment.left >= h.next.right);
+    EXPECT_TRUE(h.segment.right > h.segment.left);
+    EXPECT_NEAR(h.modeDay.left, h.segment.left, 0.01);
+    EXPECT_NEAR(h.modeMonth.right, h.segment.right, 0.01);
+    EXPECT_NEAR(h.modeDay.right, h.modeWeek.left, 0.01);
+    EXPECT_NEAR(h.modeWeek.right, h.modeMonth.left, 0.01);
+    EXPECT_TRUE(std::fabs(h.modeDay.Width() - h.modeWeek.Width()) < 0.5f);
+    EXPECT_TRUE(std::fabs(h.modeWeek.Width() - h.modeMonth.Width()) < 0.5f);
+
+    // Today icon is pinned to the right edge.
+    EXPECT_TRUE(h.todayVisible);
+    EXPECT_TRUE(h.today.left > h.segment.right);
+
+    // Hit-testing routes each region.
+    EXPECT_TRUE(GuiCalendar::HitTestHeader(Mid(h.prev.left, h.prev.right), Mid(h.prev.top, h.prev.bottom), h) ==
+                GuiCalendar::HeaderHit::Prev);
+    EXPECT_TRUE(GuiCalendar::HitTestHeader(Mid(h.next.left, h.next.right), Mid(h.next.top, h.next.bottom), h) ==
+                GuiCalendar::HeaderHit::Next);
+    EXPECT_TRUE(GuiCalendar::HitTestHeader(Mid(h.modeDay.left, h.modeDay.right), Mid(h.modeDay.top, h.modeDay.bottom), h) ==
+                GuiCalendar::HeaderHit::ModeDay);
+    EXPECT_TRUE(GuiCalendar::HitTestHeader(Mid(h.modeWeek.left, h.modeWeek.right), Mid(h.modeWeek.top, h.modeWeek.bottom), h) ==
+                GuiCalendar::HeaderHit::ModeWeek);
+    EXPECT_TRUE(GuiCalendar::HitTestHeader(Mid(h.modeMonth.left, h.modeMonth.right), Mid(h.modeMonth.top, h.modeMonth.bottom), h) ==
+                GuiCalendar::HeaderHit::ModeMonth);
+    EXPECT_TRUE(GuiCalendar::HitTestHeader(Mid(h.today.left, h.today.right), Mid(h.today.top, h.today.bottom), h) ==
+                GuiCalendar::HeaderHit::Today);
+}
+
+void HeaderHidesTodayWhenNotRequested() {
+    const GuiCalendar::HeaderLayout h = GuiCalendar::ComputeHeader(700.0f, 1.0f, false);
+    EXPECT_FALSE(h.todayVisible);
+    EXPECT_TRUE(GuiCalendar::HitTestHeader(700.0f - 20.0f, 20.0f, h) != GuiCalendar::HeaderHit::Today);
+}
+
+void HeaderDegradesOnNarrowWidthsWithoutOverlap() {
+    const float widths[] = { 400.0f, 280.0f, 200.0f, 160.0f, 120.0f };
+    for (float w : widths) {
+        const GuiCalendar::HeaderLayout h = GuiCalendar::ComputeHeader(w, 1.0f, true);
+        // Segmented never overlaps the nav group and is always positive width.
+        EXPECT_TRUE(h.segment.left >= h.next.right);
+        EXPECT_TRUE(h.segment.right > h.segment.left);
+        // Segments stay contiguous and equal at every width.
+        EXPECT_NEAR(h.modeDay.right, h.modeWeek.left, 0.01);
+        EXPECT_NEAR(h.modeWeek.right, h.modeMonth.left, 0.01);
+        EXPECT_NEAR(h.modeMonth.right, h.segment.right, 0.01);
+        // When the title is visible it must not run into the segmented control.
+        if (h.titleVisible) {
+            EXPECT_TRUE(h.title.right <= h.segment.left + 0.5f);
+            EXPECT_TRUE(h.title.right > h.title.left);
+        }
+        // When today is visible it stays right of the segmented control.
+        if (h.todayVisible) EXPECT_TRUE(h.today.left >= h.segment.right);
+    }
+
+    // Tightest realistic widths drop the title (and then today) before crowding.
+    const GuiCalendar::HeaderLayout narrow = GuiCalendar::ComputeHeader(160.0f, 1.0f, true);
+    EXPECT_FALSE(narrow.titleVisible);
+    EXPECT_FALSE(narrow.todayVisible);
 }
 
 void WeekFrameHasSevenEqualContiguousColumns() {
@@ -99,17 +146,9 @@ void WeekBlockRectsMapDayAndLane() {
     EXPECT_TRUE(a.right <= b.left + 0.5f);
 }
 
-void WeekHitTestRoutesHeaderColumnsAndBlocks() {
+void WeekBodyHitTestRoutesDayHeaderBlockEmpty() {
     const GuiCalendar::WeekFrame f = GuiCalendar::ComputeWeekFrame(700.0f, 600.0f, 1.0f);
     const std::vector<GuiCalendar::WeekBlockRect> none;
-
-    EXPECT_TRUE(GuiCalendar::HitTestWeek(Mid(f.prev.left, f.prev.right), Mid(f.prev.top, f.prev.bottom),
-                                         0.0f, 1.0f, f, none).kind == GuiCalendar::WeekHitKind::Prev);
-    EXPECT_TRUE(GuiCalendar::HitTestWeek(Mid(f.today.left, f.today.right), Mid(f.today.top, f.today.bottom),
-                                         0.0f, 1.0f, f, none).kind == GuiCalendar::WeekHitKind::Today);
-    EXPECT_TRUE(GuiCalendar::HitTestWeek(Mid(f.mode.week.left, f.mode.week.right),
-                                         Mid(f.mode.week.top, f.mode.week.bottom), 0.0f, 1.0f, f, none)
-                    .kind == GuiCalendar::WeekHitKind::ModeWeek);
 
     const GuiCalendar::WeekHitResult header =
         GuiCalendar::HitTestWeek(Mid(f.dayHeaders[3].left, f.dayHeaders[3].right),
@@ -117,7 +156,6 @@ void WeekHitTestRoutesHeaderColumnsAndBlocks() {
     EXPECT_TRUE(header.kind == GuiCalendar::WeekHitKind::DayHeader);
     EXPECT_EQ(header.dayIndex, 3);
 
-    // A block in column 2 at content y for 1:00, well inside the viewport at scroll 0.
     const Gui::Rect rect = GuiCalendar::ComputeWeekBlockRect(f, 2, GuiCalendar::LaneSpan{ 0, 1 }, 60, 120);
     const std::vector<GuiCalendar::WeekBlockRect> blocks = { GuiCalendar::WeekBlockRect{ 7, 2, rect } };
     const float localY = f.timelineViewport.top + Mid(rect.top, rect.bottom);
@@ -139,10 +177,8 @@ void MonthFrameHasFortyTwoCellGrid() {
     EXPECT_TRUE(f.cellHeight > 0.0f);
     EXPECT_EQ((int)f.cells.size(), 42);
 
-    // Row 1 cell 0 sits directly below row 0 cell 0.
     EXPECT_NEAR(f.cells[7].left, f.cells[0].left, 0.01);
     EXPECT_NEAR(f.cells[7].top, f.cells[0].bottom, 0.01);
-    // Columns within a row are contiguous and equal width.
     for (int c = 1; c < 7; ++c) {
         EXPECT_TRUE(std::fabs(f.cells[(size_t)c].left - f.cells[(size_t)(c - 1)].right) < 0.5f);
         EXPECT_TRUE(std::fabs(f.cells[(size_t)c].Width() - f.cells[0].Width()) < 1.0f);
@@ -150,14 +186,8 @@ void MonthFrameHasFortyTwoCellGrid() {
     }
 }
 
-void MonthHitTestReturnsCellIndexAndHeader() {
+void MonthBodyHitTestReturnsCellIndex() {
     const GuiCalendar::MonthFrame f = GuiCalendar::ComputeMonthFrame(700.0f, 600.0f, 1.0f);
-    EXPECT_TRUE(GuiCalendar::HitTestMonth(Mid(f.next.left, f.next.right), Mid(f.next.top, f.next.bottom),
-                                          1.0f, f).kind == GuiCalendar::MonthHitKind::Next);
-    EXPECT_TRUE(GuiCalendar::HitTestMonth(Mid(f.mode.month.left, f.mode.month.right),
-                                          Mid(f.mode.month.top, f.mode.month.bottom), 1.0f, f)
-                    .kind == GuiCalendar::MonthHitKind::ModeMonth);
-
     const GuiCalendar::MonthHitResult first =
         GuiCalendar::HitTestMonth(Mid(f.cells[0].left, f.cells[0].right),
                                   Mid(f.cells[0].top, f.cells[0].bottom), 1.0f, f);
@@ -172,13 +202,15 @@ void MonthHitTestReturnsCellIndexAndHeader() {
 }
 
 const TestCase kTests[] = {
-    {"ModeControlSegmentsAreEqualContiguousAndHitTestable", ModeControlSegmentsAreEqualContiguousAndHitTestable},
+    {"HeaderGroupsNavConnectsSegmentsAndPinsToday", HeaderGroupsNavConnectsSegmentsAndPinsToday},
+    {"HeaderHidesTodayWhenNotRequested", HeaderHidesTodayWhenNotRequested},
+    {"HeaderDegradesOnNarrowWidthsWithoutOverlap", HeaderDegradesOnNarrowWidthsWithoutOverlap},
     {"WeekFrameHasSevenEqualContiguousColumns", WeekFrameHasSevenEqualContiguousColumns},
     {"LanePackingIsDeterministic", LanePackingIsDeterministic},
     {"WeekBlockRectsMapDayAndLane", WeekBlockRectsMapDayAndLane},
-    {"WeekHitTestRoutesHeaderColumnsAndBlocks", WeekHitTestRoutesHeaderColumnsAndBlocks},
+    {"WeekBodyHitTestRoutesDayHeaderBlockEmpty", WeekBodyHitTestRoutesDayHeaderBlockEmpty},
     {"MonthFrameHasFortyTwoCellGrid", MonthFrameHasFortyTwoCellGrid},
-    {"MonthHitTestReturnsCellIndexAndHeader", MonthHitTestReturnsCellIndexAndHeader},
+    {"MonthBodyHitTestReturnsCellIndex", MonthBodyHitTestReturnsCellIndex},
 };
 
 } // namespace

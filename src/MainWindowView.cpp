@@ -309,10 +309,10 @@ void MainWindow::RebuildLayout() {
     for (const GuiLayout::TabRect& tab : tabStrip.tabs)
         listTabs_.push_back(ListTabLayout{ tab.listIndex, ToD2DRect(tab.rect) });
 
-    calendarFrame_ = GuiCalendar::ComputeFrame(W, ViewportHeight(), dpiScale());
-    calendarModeControl_ = GuiCalendar::ComputeModeControl(W, dpiScale());
-    calendarWeekFrame_ = GuiCalendar::ComputeWeekFrame(W, ViewportHeight(), dpiScale());
-    calendarMonthFrame_ = GuiCalendar::ComputeMonthFrame(W, ViewportHeight(), dpiScale());
+    const bool showToday = !calendarDay_.empty() && calendarDay_ != TodayDayKey();
+    calendarFrame_ = GuiCalendar::ComputeFrame(W, ViewportHeight(), dpiScale(), showToday);
+    calendarWeekFrame_ = GuiCalendar::ComputeWeekFrame(W, ViewportHeight(), dpiScale(), showToday);
+    calendarMonthFrame_ = GuiCalendar::ComputeMonthFrame(W, ViewportHeight(), dpiScale(), showToday);
     BuildCalendarBlockRects();
     BuildCalendarWeekBlockRects();
     if (calendarActive() && !calendarScrollInitialized_) AlignCalendarScrollToNow(false);
@@ -379,21 +379,26 @@ MainWindow::Hit MainWindow::HitTest(float x, float y) {
     if (calendarActive()) {
         const float localY = y - ContentTop();
 
-        // The Day/Week/Month mode control sits in the header band of every mode.
-        switch (GuiCalendar::HitTestModeControl(x, localY, calendarModeControl_)) {
-        case GuiCalendar::ModeHit::Day:   h.kind = HitKind::CalendarModeDay;   return h;
-        case GuiCalendar::ModeHit::Week:  h.kind = HitKind::CalendarModeWeek;  return h;
-        case GuiCalendar::ModeHit::Month: h.kind = HitKind::CalendarModeMonth; return h;
-        case GuiCalendar::ModeHit::None:  break;
+        // The shared header (nav, segmented mode control, today) is laid out the
+        // same way in every mode, so hit-test it first off the active frame.
+        const GuiCalendar::HeaderLayout& hdr =
+            (calendarMode() == CalendarViewMode::Week)  ? calendarWeekFrame_.header
+            : (calendarMode() == CalendarViewMode::Month) ? calendarMonthFrame_.header
+                                                          : calendarFrame_.header;
+        switch (GuiCalendar::HitTestHeader(x, localY, hdr)) {
+        case GuiCalendar::HeaderHit::Prev:      h.kind = HitKind::CalendarPrevDay;   return h;
+        case GuiCalendar::HeaderHit::Next:      h.kind = HitKind::CalendarNextDay;   return h;
+        case GuiCalendar::HeaderHit::Today:     h.kind = HitKind::CalendarToday;     return h;
+        case GuiCalendar::HeaderHit::ModeDay:   h.kind = HitKind::CalendarModeDay;   return h;
+        case GuiCalendar::HeaderHit::ModeWeek:  h.kind = HitKind::CalendarModeWeek;  return h;
+        case GuiCalendar::HeaderHit::ModeMonth: h.kind = HitKind::CalendarModeMonth; return h;
+        case GuiCalendar::HeaderHit::None:      break;
         }
 
         if (calendarMode() == CalendarViewMode::Week) {
             const GuiCalendar::WeekHitResult wh = GuiCalendar::HitTestWeek(
                 x, localY, calendarScroll_, dpiScale(), calendarWeekFrame_, calendarWeekBlockRects_);
             switch (wh.kind) {
-            case GuiCalendar::WeekHitKind::Prev:  h.kind = HitKind::CalendarPrevDay; return h;
-            case GuiCalendar::WeekHitKind::Next:  h.kind = HitKind::CalendarNextDay; return h;
-            case GuiCalendar::WeekHitKind::Today: h.kind = HitKind::CalendarToday;   return h;
             case GuiCalendar::WeekHitKind::DayHeader:
                 h.kind = HitKind::CalendarWeekDayHeader;
                 h.rowIndex = wh.dayIndex;
@@ -403,9 +408,6 @@ MainWindow::Hit MainWindow::HitTest(float x, float y) {
                 h.itemIndex = wh.blockId;
                 h.rowIndex = wh.dayIndex;
                 return h;
-            case GuiCalendar::WeekHitKind::ModeDay:
-            case GuiCalendar::WeekHitKind::ModeWeek:
-            case GuiCalendar::WeekHitKind::ModeMonth:
             case GuiCalendar::WeekHitKind::EmptyColumn:
             case GuiCalendar::WeekHitKind::None:
                 return h;
@@ -417,16 +419,10 @@ MainWindow::Hit MainWindow::HitTest(float x, float y) {
             const GuiCalendar::MonthHitResult mh =
                 GuiCalendar::HitTestMonth(x, localY, dpiScale(), calendarMonthFrame_);
             switch (mh.kind) {
-            case GuiCalendar::MonthHitKind::Prev:  h.kind = HitKind::CalendarPrevDay; return h;
-            case GuiCalendar::MonthHitKind::Next:  h.kind = HitKind::CalendarNextDay; return h;
-            case GuiCalendar::MonthHitKind::Today: h.kind = HitKind::CalendarToday;   return h;
             case GuiCalendar::MonthHitKind::Cell:
                 h.kind = HitKind::CalendarMonthCell;
                 h.itemIndex = mh.cellIndex;
                 return h;
-            case GuiCalendar::MonthHitKind::ModeDay:
-            case GuiCalendar::MonthHitKind::ModeWeek:
-            case GuiCalendar::MonthHitKind::ModeMonth:
             case GuiCalendar::MonthHitKind::None:
                 return h;
             }
@@ -436,15 +432,6 @@ MainWindow::Hit MainWindow::HitTest(float x, float y) {
         const GuiCalendar::HitResult calendarHit =
             GuiCalendar::HitTest(x, localY, calendarScroll_, dpiScale(), calendarFrame_, calendarBlockRects_);
         switch (calendarHit.kind) {
-        case GuiCalendar::HitKind::PrevDay:
-            h.kind = HitKind::CalendarPrevDay;
-            return h;
-        case GuiCalendar::HitKind::NextDay:
-            h.kind = HitKind::CalendarNextDay;
-            return h;
-        case GuiCalendar::HitKind::Today:
-            h.kind = HitKind::CalendarToday;
-            return h;
         case GuiCalendar::HitKind::EmptyTimeline:
             h.kind = HitKind::CalendarEmptyTimeline;
             return h;
@@ -845,33 +832,9 @@ void MainWindow::DrawCalendarDay(float W, float H) {
 
     FillRect(D2D1::RectF(0, top, W, H), theme_.colors.paper);
 
-    auto offRect = [&](const Gui::Rect& r) {
-        D2D1_RECT_F d = ToD2DRect(r);
-        d.top += top;
-        d.bottom += top;
-        return d;
-    };
-
-    // —— 日期头：居中日名，两侧导航 ——
+    // Header chrome (nav, mode control, today) is drawn by DrawCalendarHeader.
     const auto dayBlocks = calendar_.BlocksForDay(calendarDay_);
     const std::vector<int> conflictIds = ConflictingBlockIds(dayBlocks);
-
-    D2D1_RECT_F nameR = D2D1::RectF(offRect(frame.prevDay).right + S(6), top,
-                                    offRect(calendarModeControl_.day).left - S(6),
-                                    top + frame.dateHeader.bottom);
-    Text(CalendarDayLabel(calendarDay_, lang_), nameR, theme_.colors.text, textFormat_);
-
-    D2D1_RECT_F prevR = offRect(frame.prevDay);
-    D2D1_RECT_F nextR = offRect(frame.nextDay);
-    D2D1_RECT_F todayR = offRect(frame.today);
-    DrawSurfaceFrame(prevR, S(7), theme_.colors.paperElevated, theme_.colors.paperEdge, S(1));
-    DrawSurfaceFrame(nextR, S(7), theme_.colors.paperElevated, theme_.colors.paperEdge, S(1));
-    DrawSurfaceFrame(todayR, S(7), theme_.colors.paperElevated, theme_.colors.paperEdge, S(1));
-    smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-    Text(L"<", prevR, theme_.colors.textWeak, smallFormat_);
-    Text(L">", nextR, theme_.colors.textWeak, smallFormat_);
-    Text(T(Str::CalendarToday, lang_), todayR, theme_.colors.text, smallFormat_);
-    smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
 
     // —— 时间轴 ——
     const float tlTop = top + frame.timelineViewport.top;
@@ -975,25 +938,83 @@ void MainWindow::DrawCalendarView(float W, float H) {
     case CalendarViewMode::Day:
     default:                      DrawCalendarDay(W, H);   break;
     }
-    DrawCalendarModeControl();
+    const GuiCalendar::HeaderLayout& hdr =
+        (calendarMode() == CalendarViewMode::Week)  ? calendarWeekFrame_.header
+        : (calendarMode() == CalendarViewMode::Month) ? calendarMonthFrame_.header
+                                                      : calendarFrame_.header;
+    DrawCalendarHeader(hdr, CalendarHeaderTitle(hdr.compactTitle));
 }
 
-void MainWindow::DrawCalendarModeControl() {
+std::wstring MainWindow::CalendarHeaderTitle(bool compact) const {
+    CalendarDate::Date d;
+    if (!CalendarDate::Parse(calendarDay_, d)) return CalendarDayLabel(calendarDay_, lang_);
+    wchar_t buf[48];
+    switch (calendarMode()) {
+    case CalendarViewMode::Week: {
+        const CalendarDate::Date ws = CalendarDate::StartOfWeek(d);
+        if (compact) { swprintf_s(buf, L"%d/%d", ws.month, ws.day); return buf; }
+        const CalendarDate::Date we = CalendarDate::AddDays(ws, 6);
+        if (lang_ == Lang::Zh) swprintf_s(buf, L"%d月%d日 - %d月%d日", ws.month, ws.day, we.month, we.day);
+        else                   swprintf_s(buf, L"%d/%d - %d/%d", ws.month, ws.day, we.month, we.day);
+        return buf;
+    }
+    case CalendarViewMode::Month:
+        if (lang_ == Lang::Zh) swprintf_s(buf, L"%04d年%02d月", d.year, d.month);
+        else                   swprintf_s(buf, L"%04d-%02d", d.year, d.month);
+        return buf;
+    case CalendarViewMode::Day:
+    default:
+        if (compact) { swprintf_s(buf, L"%d/%d", d.month, d.day); return buf; }
+        return CalendarDayLabel(calendarDay_, lang_);
+    }
+}
+
+void MainWindow::DrawCalendarHeader(const GuiCalendar::HeaderLayout& header, const std::wstring& title) {
     const float top = ContentTop();
-    auto seg = [&](const Gui::Rect& r, Str label, bool active) {
+    auto off = [&](const Gui::Rect& r) {
         D2D1_RECT_F d = ToD2DRect(r);
         d.top += top;
         d.bottom += top;
-        DrawSurfaceFrame(d, S(6),
-                         active ? theme_.colors.buttonPressed : theme_.colors.paperElevated,
-                         theme_.colors.paperEdge, S(1));
+        return d;
+    };
+
+    // Grouped nav chevrons (no boxes, kept subtle).
+    smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    Text(L"‹", off(header.prev), theme_.colors.textWeak, smallFormat_);
+    Text(L"›", off(header.next), theme_.colors.textWeak, smallFormat_);
+    smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+
+    if (header.titleVisible && !title.empty())
+        Text(title, off(header.title), theme_.colors.text, textFormat_);
+
+    // Connected segmented control: one rounded container, selected segment filled.
+    DrawSurfaceFrame(off(header.segment), S(7), theme_.colors.paperElevated,
+                     theme_.colors.paperEdge, S(1));
+    auto drawSeg = [&](const Gui::Rect& r, Str label, bool active) {
+        const D2D1_RECT_F d = off(r);
+        if (active) {
+            D2D1_ROUNDED_RECT rr{ D2D1::RectF(d.left + S(2), d.top + S(2), d.right - S(2), d.bottom - S(2)),
+                                  S(5), S(5) };
+            FillRoundRect(rr, theme_.colors.focusRing);
+        }
         smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        Text(T(label, lang_), d, active ? theme_.colors.text : theme_.colors.textWeak, smallFormat_);
+        Text(T(label, lang_), d, active ? theme_.colors.paper : theme_.colors.text, smallFormat_);
         smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
     };
-    seg(calendarModeControl_.day,   Str::CalendarModeDay,   calendarMode() == CalendarViewMode::Day);
-    seg(calendarModeControl_.week,  Str::CalendarModeWeek,  calendarMode() == CalendarViewMode::Week);
-    seg(calendarModeControl_.month, Str::CalendarModeMonth, calendarMode() == CalendarViewMode::Month);
+    drawSeg(header.modeDay,   Str::CalendarModeDay,   calendarMode() == CalendarViewMode::Day);
+    drawSeg(header.modeWeek,  Str::CalendarModeWeek,  calendarMode() == CalendarViewMode::Week);
+    drawSeg(header.modeMonth, Str::CalendarModeMonth, calendarMode() == CalendarViewMode::Month);
+
+    // Back-to-today target glyph, shown only when the anchor is not today.
+    if (header.todayVisible) {
+        const D2D1_RECT_F td = off(header.today);
+        DrawSurfaceFrame(td, S(7), theme_.colors.paperElevated, theme_.colors.paperEdge, S(1));
+        const float cx = (td.left + td.right) * 0.5f;
+        const float cy = (td.top + td.bottom) * 0.5f;
+        brush_->SetColor(Theme::D2DColor(theme_.colors.focusRing));
+        rt_->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), S(5), S(5)), brush_, S(1.4f));
+        rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), S(1.6f), S(1.6f)), brush_);
+    }
 }
 
 void MainWindow::DrawCalendarWeek(float W, float H) {
@@ -1020,26 +1041,7 @@ void MainWindow::DrawCalendarWeek(float W, float H) {
     if (haveWeek) weekStart = CalendarDate::StartOfWeek(anchor);
     const std::string todayKey = TodayDayKey();
 
-    D2D1_RECT_F prevR = offRect(frame.prev);
-    D2D1_RECT_F nextR = offRect(frame.next);
-    D2D1_RECT_F todayR = offRect(frame.today);
-    DrawSurfaceFrame(prevR, S(7), theme_.colors.paperElevated, theme_.colors.paperEdge, S(1));
-    DrawSurfaceFrame(nextR, S(7), theme_.colors.paperElevated, theme_.colors.paperEdge, S(1));
-    DrawSurfaceFrame(todayR, S(7), theme_.colors.paperElevated, theme_.colors.paperEdge, S(1));
-    smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-    Text(L"<", prevR, theme_.colors.textWeak, smallFormat_);
-    Text(L">", nextR, theme_.colors.textWeak, smallFormat_);
-    Text(T(Str::CalendarToday, lang_), todayR, theme_.colors.text, smallFormat_);
-    smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-
-    if (haveWeek) {
-        D2D1_RECT_F nameR = D2D1::RectF(prevR.right + S(6), top,
-                                        offRect(calendarModeControl_.day).left - S(6),
-                                        top + frame.header.bottom);
-        Text(CalendarDayLabel(CalendarDate::Format(weekStart), lang_), nameR,
-             theme_.colors.text, textFormat_);
-    }
-
+    // Header chrome (nav, mode control, today) is drawn by DrawCalendarHeader.
     static const wchar_t* kWeekdayZh[7] = { L"一", L"二", L"三", L"四", L"五", L"六", L"日" };
     static const wchar_t* kWeekdayEn[7] = { L"Mon", L"Tue", L"Wed", L"Thu", L"Fri", L"Sat", L"Sun" };
     for (int i = 0; i < 7; ++i) {
@@ -1150,28 +1152,7 @@ void MainWindow::DrawCalendarMonth(float W, float H) {
     if (haveMonth) gridStart = CalendarDate::MonthGridStart(anchor.year, anchor.month);
     const std::string todayKey = TodayDayKey();
 
-    D2D1_RECT_F prevR = offRect(frame.prev);
-    D2D1_RECT_F nextR = offRect(frame.next);
-    D2D1_RECT_F todayR = offRect(frame.today);
-    DrawSurfaceFrame(prevR, S(7), theme_.colors.paperElevated, theme_.colors.paperEdge, S(1));
-    DrawSurfaceFrame(nextR, S(7), theme_.colors.paperElevated, theme_.colors.paperEdge, S(1));
-    DrawSurfaceFrame(todayR, S(7), theme_.colors.paperElevated, theme_.colors.paperEdge, S(1));
-    smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-    Text(L"<", prevR, theme_.colors.textWeak, smallFormat_);
-    Text(L">", nextR, theme_.colors.textWeak, smallFormat_);
-    Text(T(Str::CalendarToday, lang_), todayR, theme_.colors.text, smallFormat_);
-    smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-
-    if (haveMonth) {
-        wchar_t buf[32];
-        if (lang_ == Lang::Zh) swprintf_s(buf, L"%04d年%02d月", anchor.year, anchor.month);
-        else                   swprintf_s(buf, L"%04d-%02d", anchor.year, anchor.month);
-        D2D1_RECT_F nameR = D2D1::RectF(prevR.right + S(6), top,
-                                        offRect(calendarModeControl_.day).left - S(6),
-                                        top + frame.header.bottom);
-        Text(buf, nameR, theme_.colors.text, textFormat_);
-    }
-
+    // Header chrome (nav, mode control, today) is drawn by DrawCalendarHeader.
     static const wchar_t* kWeekdayZh[7] = { L"一", L"二", L"三", L"四", L"五", L"六", L"日" };
     static const wchar_t* kWeekdayEn[7] = { L"Mon", L"Tue", L"Wed", L"Thu", L"Fri", L"Sat", L"Sun" };
     smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);

@@ -118,7 +118,8 @@ private:
     void DrawCalendarDay(float windowWidth, float windowHeight);
     void DrawCalendarWeek(float windowWidth, float windowHeight);
     void DrawCalendarMonth(float windowWidth, float windowHeight);
-    void DrawCalendarModeControl();
+    void DrawCalendarHeader(const GuiCalendar::HeaderLayout& header, const std::wstring& title);
+    std::wstring CalendarHeaderTitle(bool compact) const;
     void DrawSection(); // 已完成折叠条（内容层，文档坐标）
     void DrawEmptyActivePrompt(bool hovered); // 空列表的居中提示（图标 + 文案 + 新建按钮）
     void DrawAddTaskRow(bool hovered);        // 列表底部常驻"新建待办"入口
@@ -295,7 +296,6 @@ private:
     std::string calendarDay_;
     GuiCalendar::Frame calendarFrame_{};
     std::vector<GuiCalendar::BlockRect> calendarBlockRects_;
-    GuiCalendar::ModeControl calendarModeControl_{};
     GuiCalendar::WeekFrame calendarWeekFrame_{};
     GuiCalendar::MonthFrame calendarMonthFrame_{};
     std::vector<GuiCalendar::WeekBlockRect> calendarWeekBlockRects_;

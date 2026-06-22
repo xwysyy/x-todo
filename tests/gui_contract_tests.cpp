@@ -426,26 +426,25 @@ void CalendarHitTestingUsesBlockRectsAndResizeHandles() {
 }
 
 void CalendarHeaderButtonsLayout() {
-    const GuiCalendar::Frame frame = GuiCalendar::ComputeFrame(320.0f, 500.0f, 1.0f);
-    const std::vector<GuiCalendar::BlockRect> none;
+    const GuiCalendar::Frame frame = GuiCalendar::ComputeFrame(320.0f, 500.0f, 1.0f, true);
+    const GuiCalendar::HeaderLayout& hd = frame.header;
 
-    EXPECT_EQ(GuiCalendar::HitTest(Mid(frame.prevDay.left, frame.prevDay.right),
-                                   Mid(frame.prevDay.top, frame.prevDay.bottom),
-                                   0.0f, 1.0f, frame, none).kind,
-              GuiCalendar::HitKind::PrevDay);
-    EXPECT_EQ(GuiCalendar::HitTest(Mid(frame.nextDay.left, frame.nextDay.right),
-                                   Mid(frame.nextDay.top, frame.nextDay.bottom),
-                                   0.0f, 1.0f, frame, none).kind,
-              GuiCalendar::HitKind::NextDay);
-    EXPECT_EQ(GuiCalendar::HitTest(Mid(frame.today.left, frame.today.right),
-                                   Mid(frame.today.top, frame.today.bottom),
-                                   0.0f, 1.0f, frame, none).kind,
-              GuiCalendar::HitKind::Today);
+    EXPECT_TRUE(GuiCalendar::HitTestHeader(Mid(hd.prev.left, hd.prev.right),
+                                           Mid(hd.prev.top, hd.prev.bottom), hd) ==
+                GuiCalendar::HeaderHit::Prev);
+    EXPECT_TRUE(GuiCalendar::HitTestHeader(Mid(hd.next.left, hd.next.right),
+                                           Mid(hd.next.top, hd.next.bottom), hd) ==
+                GuiCalendar::HeaderHit::Next);
+    EXPECT_TRUE(hd.todayVisible);
+    EXPECT_TRUE(GuiCalendar::HitTestHeader(Mid(hd.today.left, hd.today.right),
+                                           Mid(hd.today.top, hd.today.bottom), hd) ==
+                GuiCalendar::HeaderHit::Today);
 
-    // Today button sits between prev and next without overlap.
-    EXPECT_TRUE(frame.today.left > frame.prevDay.right);
-    EXPECT_TRUE(frame.today.right <= frame.nextDay.left);
-    // Timeline starts right below the date header (no all-day band).
+    // Prev and next form a left-aligned group; segmented stays clear of them.
+    EXPECT_TRUE(hd.next.left >= hd.prev.right - 0.5f);
+    EXPECT_TRUE(hd.next.left <= hd.prev.right + 6.0f);
+    EXPECT_TRUE(hd.segment.left >= hd.next.right);
+    // Timeline starts right below the header (no all-day band).
     EXPECT_TRUE(frame.timelineViewport.top < frame.timelineViewport.bottom);
 }
 

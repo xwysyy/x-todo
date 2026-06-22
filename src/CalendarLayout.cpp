@@ -23,24 +23,15 @@ int Digit(wchar_t ch) {
 
 } // namespace
 
-Frame ComputeFrame(float windowWidth, float viewportHeight, float dpiScale) {
+Frame ComputeFrame(float windowWidth, float viewportHeight, float dpiScale, bool showToday) {
     const float pad = S(Theme::kPadX, dpiScale);
     const float headerH = S(40.0f, dpiScale);
     const float timelineTop = headerH + S(8.0f, dpiScale);
     const float gutterW = S(54.0f, dpiScale);
     const float hourH = S(56.0f, dpiScale);
-    const float navSize = S(26.0f, dpiScale);
-    const float navTop = (headerH - navSize) * 0.5f;
-    const float todayW = S(46.0f, dpiScale);
-    const float gap = S(6.0f, dpiScale);
 
     Frame out;
-    out.dateHeader = Gui::Rect{ pad, 0.0f, windowWidth - pad, headerH };
-    out.prevDay = Gui::Rect{ pad, navTop, pad + navSize, navTop + navSize };
-    out.nextDay = Gui::Rect{ windowWidth - pad - navSize, navTop,
-                             windowWidth - pad, navTop + navSize };
-    out.today = Gui::Rect{ out.nextDay.left - gap - todayW, navTop,
-                           out.nextDay.left - gap, navTop + navSize };
+    out.header = ComputeHeader(windowWidth, dpiScale, showToday);
 
     float timelineBottom = viewportHeight;
     if (timelineBottom < timelineTop) timelineBottom = timelineTop;
@@ -64,9 +55,6 @@ Gui::Rect ComputeBlockRect(const Frame& frame, int blockId, int startMinute, int
 
 HitResult HitTest(float x, float y, float scroll, float dpiScale, const Frame& frame,
                   const std::vector<BlockRect>& blocks) {
-    if (frame.prevDay.Contains(x, y)) return HitResult{ HitKind::PrevDay, -1 };
-    if (frame.nextDay.Contains(x, y)) return HitResult{ HitKind::NextDay, -1 };
-    if (frame.today.Contains(x, y)) return HitResult{ HitKind::Today, -1 };
     if (!frame.timelineViewport.Contains(x, y)) return {};
 
     const float docY = y - frame.timelineViewport.top + scroll;
@@ -283,73 +271,91 @@ std::wstring FormatTimeText(int minute) {
     return std::wstring(buf);
 }
 
-namespace {
-
-// Header band geometry shared by day, week, and month frames.
-struct HeaderBand {
-    float pad = 0.0f;
-    float headerH = 0.0f;
-    Gui::Rect header;
-    Gui::Rect prev;
-    Gui::Rect next;
-    Gui::Rect today;
-};
-
-HeaderBand ComputeHeaderBand(float windowWidth, float dpiScale) {
+HeaderLayout ComputeHeader(float windowWidth, float dpiScale, bool showToday) {
     const float pad = S(Theme::kPadX, dpiScale);
     const float headerH = S(40.0f, dpiScale);
     const float navSize = S(26.0f, dpiScale);
+    const float navGap = S(2.0f, dpiScale);
+    const float gap = S(8.0f, dpiScale);
+    const float todaySize = S(26.0f, dpiScale);
+    const float segH = S(26.0f, dpiScale);
+    const float segIdeal = S(132.0f, dpiScale);
+    const float segMin = S(96.0f, dpiScale);
+    const float segFloor = S(40.0f, dpiScale);
+    const float titleMin = S(44.0f, dpiScale);
+    const float titleCompact = S(120.0f, dpiScale);
+
     const float navTop = (headerH - navSize) * 0.5f;
-    const float todayW = S(46.0f, dpiScale);
-    const float gap = S(6.0f, dpiScale);
+    const float segTop = (headerH - segH) * 0.5f;
 
-    HeaderBand b;
-    b.pad = pad;
-    b.headerH = headerH;
-    b.header = Gui::Rect{ pad, 0.0f, windowWidth - pad, headerH };
-    b.prev = Gui::Rect{ pad, navTop, pad + navSize, navTop + navSize };
-    b.next = Gui::Rect{ windowWidth - pad - navSize, navTop, windowWidth - pad, navTop + navSize };
-    b.today = Gui::Rect{ b.next.left - gap - todayW, navTop, b.next.left - gap, navTop + navSize };
-    return b;
+    HeaderLayout h;
+    h.headerHeight = headerH;
+    h.prev = Gui::Rect{ pad, navTop, pad + navSize, navTop + navSize };
+    h.next = Gui::Rect{ h.prev.right + navGap, navTop, h.prev.right + navGap + navSize, navTop + navSize };
+    const float navEnd = h.next.right;
+
+    const float rightEdge = windowWidth - pad;
+    const float avail = rightEdge - (navEnd + gap); // region right of nav for title + segmented + today
+
+    // Today icon only when requested and there is room for a minimum segmented plus it.
+    float rightCursor = rightEdge;
+    if (showToday && avail >= segMin + gap + todaySize) {
+        h.today = Gui::Rect{ rightCursor - todaySize, navTop, rightCursor, navTop + navSize };
+        h.todayVisible = true;
+        rightCursor = h.today.left - gap;
+    }
+
+    // Segmented control: ideal width, shrink toward the room left of the cursor.
+    const float room = rightCursor - (navEnd + gap);
+    float segW = segIdeal;
+    if (segW > room) segW = room;
+    if (segW < segMin && room >= segMin) segW = segMin;
+    if (segW < segFloor) segW = segFloor;
+
+    float segRight = rightCursor;
+    float segLeft = segRight - segW;
+    if (segLeft < navEnd + gap) { // never overlap the nav group
+        segLeft = navEnd + gap;
+        if (segRight < segLeft + segFloor) segRight = segLeft + segFloor;
+    }
+    h.segment = Gui::Rect{ segLeft, segTop, segRight, segTop + segH };
+    const float unit = (segRight - segLeft) / 3.0f;
+    h.modeDay   = Gui::Rect{ segLeft,                segTop, segLeft + unit,        segTop + segH };
+    h.modeWeek  = Gui::Rect{ segLeft + unit,         segTop, segLeft + unit * 2.0f, segTop + segH };
+    h.modeMonth = Gui::Rect{ segLeft + unit * 2.0f,  segTop, segRight,              segTop + segH };
+
+    // Title fills the gap between the nav group and the segmented control.
+    const float titleLeft = navEnd + gap;
+    const float titleRight = segLeft - gap;
+    if (titleRight - titleLeft >= titleMin) {
+        h.title = Gui::Rect{ titleLeft, 0.0f, titleRight, headerH };
+        h.titleVisible = true;
+        h.compactTitle = (titleRight - titleLeft) < titleCompact;
+    }
+    return h;
 }
 
-} // namespace
+HeaderHit HitTestHeader(float x, float y, const HeaderLayout& header) {
+    if (header.todayVisible && header.today.Contains(x, y)) return HeaderHit::Today;
+    if (header.prev.Contains(x, y)) return HeaderHit::Prev;
+    if (header.next.Contains(x, y)) return HeaderHit::Next;
+    if (header.modeDay.Contains(x, y)) return HeaderHit::ModeDay;
+    if (header.modeWeek.Contains(x, y)) return HeaderHit::ModeWeek;
+    if (header.modeMonth.Contains(x, y)) return HeaderHit::ModeMonth;
+    return HeaderHit::None;
+}
 
-ModeControl ComputeModeControl(float windowWidth, float dpiScale) {
+WeekFrame ComputeWeekFrame(float windowWidth, float viewportHeight, float dpiScale, bool showToday) {
+    const float pad = S(Theme::kPadX, dpiScale);
     const float headerH = S(40.0f, dpiScale);
-    const float segW = S(44.0f, dpiScale);
-    const float segH = S(24.0f, dpiScale);
-    const float top = (headerH - segH) * 0.5f;
-    const float left = windowWidth * 0.5f - segW * 1.5f;
-
-    ModeControl mc;
-    mc.day = Gui::Rect{ left, top, left + segW, top + segH };
-    mc.week = Gui::Rect{ left + segW, top, left + segW * 2.0f, top + segH };
-    mc.month = Gui::Rect{ left + segW * 2.0f, top, left + segW * 3.0f, top + segH };
-    return mc;
-}
-
-ModeHit HitTestModeControl(float x, float y, const ModeControl& mc) {
-    if (mc.day.Contains(x, y)) return ModeHit::Day;
-    if (mc.week.Contains(x, y)) return ModeHit::Week;
-    if (mc.month.Contains(x, y)) return ModeHit::Month;
-    return ModeHit::None;
-}
-
-WeekFrame ComputeWeekFrame(float windowWidth, float viewportHeight, float dpiScale) {
-    const HeaderBand band = ComputeHeaderBand(windowWidth, dpiScale);
     const float gutterW = S(54.0f, dpiScale);
     const float hourH = S(56.0f, dpiScale);
-    const float dayHeaderTop = band.headerH + S(8.0f, dpiScale);
+    const float dayHeaderTop = headerH + S(8.0f, dpiScale);
     const float dayHeaderH = S(22.0f, dpiScale);
     const float timelineTop = dayHeaderTop + dayHeaderH;
 
     WeekFrame out;
-    out.header = band.header;
-    out.prev = band.prev;
-    out.next = band.next;
-    out.today = band.today;
-    out.mode = ComputeModeControl(windowWidth, dpiScale);
+    out.header = ComputeHeader(windowWidth, dpiScale, showToday);
 
     float timelineBottom = viewportHeight;
     if (timelineBottom < timelineTop) timelineBottom = timelineTop;
@@ -359,7 +365,7 @@ WeekFrame ComputeWeekFrame(float windowWidth, float viewportHeight, float dpiSca
     out.gutter = Gui::Rect{ 0.0f, timelineTop, gutterW, timelineBottom };
 
     const float laneLeft = gutterW;
-    const float laneRight = windowWidth - band.pad;
+    const float laneRight = windowWidth - pad;
     const float colW = (laneRight - laneLeft) / 7.0f;
     for (int i = 0; i < 7; ++i) {
         const float left = laneLeft + colW * static_cast<float>(i);
@@ -430,15 +436,6 @@ Gui::Rect ComputeWeekBlockRect(const WeekFrame& frame, int dayIndex, const LaneS
 WeekHitResult HitTestWeek(float x, float y, float scroll, float dpiScale,
                           const WeekFrame& frame, const std::vector<WeekBlockRect>& blocks) {
     (void)dpiScale;
-    if (frame.prev.Contains(x, y)) return WeekHitResult{ WeekHitKind::Prev, -1, -1 };
-    if (frame.next.Contains(x, y)) return WeekHitResult{ WeekHitKind::Next, -1, -1 };
-    if (frame.today.Contains(x, y)) return WeekHitResult{ WeekHitKind::Today, -1, -1 };
-    switch (HitTestModeControl(x, y, frame.mode)) {
-    case ModeHit::Day:   return WeekHitResult{ WeekHitKind::ModeDay, -1, -1 };
-    case ModeHit::Week:  return WeekHitResult{ WeekHitKind::ModeWeek, -1, -1 };
-    case ModeHit::Month: return WeekHitResult{ WeekHitKind::ModeMonth, -1, -1 };
-    case ModeHit::None:  break;
-    }
     for (int i = 0; i < 7; ++i) {
         if (frame.dayHeaders[(size_t)i].Contains(x, y)) return WeekHitResult{ WeekHitKind::DayHeader, i, -1 };
     }
@@ -458,23 +455,20 @@ WeekHitResult HitTestWeek(float x, float y, float scroll, float dpiScale,
     return WeekHitResult{};
 }
 
-MonthFrame ComputeMonthFrame(float windowWidth, float viewportHeight, float dpiScale) {
-    const HeaderBand band = ComputeHeaderBand(windowWidth, dpiScale);
-    const float weekdayTop = band.headerH + S(8.0f, dpiScale);
+MonthFrame ComputeMonthFrame(float windowWidth, float viewportHeight, float dpiScale, bool showToday) {
+    const float pad = S(Theme::kPadX, dpiScale);
+    const float headerH = S(40.0f, dpiScale);
+    const float weekdayTop = headerH + S(8.0f, dpiScale);
     const float weekdayH = S(20.0f, dpiScale);
     const float gridTop = weekdayTop + weekdayH;
 
     MonthFrame out;
-    out.header = band.header;
-    out.prev = band.prev;
-    out.next = band.next;
-    out.today = band.today;
-    out.mode = ComputeModeControl(windowWidth, dpiScale);
+    out.header = ComputeHeader(windowWidth, dpiScale, showToday);
 
     float gridBottom = viewportHeight;
     if (gridBottom < gridTop) gridBottom = gridTop;
-    const float gridLeft = band.pad;
-    const float gridRight = windowWidth - band.pad;
+    const float gridLeft = pad;
+    const float gridRight = windowWidth - pad;
 
     out.weekdayRow = Gui::Rect{ gridLeft, weekdayTop, gridRight, weekdayTop + weekdayH };
     out.grid = Gui::Rect{ gridLeft, gridTop, gridRight, gridBottom };
@@ -503,15 +497,6 @@ MonthFrame ComputeMonthFrame(float windowWidth, float viewportHeight, float dpiS
 
 MonthHitResult HitTestMonth(float x, float y, float dpiScale, const MonthFrame& frame) {
     (void)dpiScale;
-    if (frame.prev.Contains(x, y)) return MonthHitResult{ MonthHitKind::Prev, -1 };
-    if (frame.next.Contains(x, y)) return MonthHitResult{ MonthHitKind::Next, -1 };
-    if (frame.today.Contains(x, y)) return MonthHitResult{ MonthHitKind::Today, -1 };
-    switch (HitTestModeControl(x, y, frame.mode)) {
-    case ModeHit::Day:   return MonthHitResult{ MonthHitKind::ModeDay, -1 };
-    case ModeHit::Week:  return MonthHitResult{ MonthHitKind::ModeWeek, -1 };
-    case ModeHit::Month: return MonthHitResult{ MonthHitKind::ModeMonth, -1 };
-    case ModeHit::None:  break;
-    }
     for (int i = 0; i < 42; ++i) {
         if (frame.cells[(size_t)i].Contains(x, y)) return MonthHitResult{ MonthHitKind::Cell, i };
     }
