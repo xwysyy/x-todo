@@ -450,12 +450,18 @@ void CalendarEditLayoutSeparatesFieldsAndChildEdits() {
     EXPECT_TRUE(layout.titleEdit.right < layout.titleFrame.right);
     EXPECT_TRUE(layout.titleEdit.top > layout.titleFrame.top);
     EXPECT_TRUE(layout.titleEdit.bottom < layout.titleFrame.bottom);
+    EXPECT_TRUE(layout.titleEdit.Width() >= layout.titleFrame.Width() - 3.0f);
+    EXPECT_TRUE(layout.titleEdit.Height() >= layout.titleFrame.Height() - 3.0f);
 
     EXPECT_TRUE(layout.startFrame.left == layout.titleFrame.left);
     EXPECT_TRUE(layout.startFrame.right < layout.endFrame.left);
     EXPECT_TRUE(layout.endFrame.right <= layout.titleFrame.right);
     EXPECT_TRUE(layout.startEdit.left > layout.startFrame.left);
     EXPECT_TRUE(layout.endEdit.right < layout.endFrame.right);
+    EXPECT_TRUE(layout.startEdit.Width() >= layout.startFrame.Width() - 3.0f);
+    EXPECT_TRUE(layout.startEdit.Height() >= layout.startFrame.Height() - 3.0f);
+    EXPECT_TRUE(layout.endEdit.Width() >= layout.endFrame.Width() - 3.0f);
+    EXPECT_TRUE(layout.endEdit.Height() >= layout.endFrame.Height() - 3.0f);
 
     EXPECT_EQ(GuiCalendar::HitTestEditField(Mid(layout.titleFrame.left, layout.titleFrame.right),
                                             Mid(layout.titleFrame.top, layout.titleFrame.bottom),
@@ -469,6 +475,24 @@ void CalendarEditLayoutSeparatesFieldsAndChildEdits() {
                                             Mid(layout.endFrame.top, layout.endFrame.bottom),
                                             layout),
               GuiCalendar::EditField::EndTime);
+    EXPECT_EQ(GuiCalendar::HitTestEditField(Mid(layout.startFrame.left, layout.startFrame.right),
+                                            layout.endFrame.bottom + 3.0f,
+                                            layout),
+              GuiCalendar::EditField::StartTime);
+    EXPECT_EQ(GuiCalendar::HitTestEditField(Mid(layout.endFrame.left, layout.endFrame.right),
+                                            layout.endFrame.bottom + 3.0f,
+                                            layout),
+              GuiCalendar::EditField::EndTime);
+    EXPECT_EQ(GuiCalendar::HitTestEditField(layout.block.left - 1.0f,
+                                            Mid(layout.block.top, layout.block.bottom),
+                                            layout),
+              GuiCalendar::EditField::None);
+
+    Gui::Rect fieldRect;
+    EXPECT_TRUE(GuiCalendar::EditFieldFrame(layout, GuiCalendar::EditField::StartTime, fieldRect));
+    EXPECT_EQ(fieldRect.left, layout.startFrame.left);
+    EXPECT_TRUE(GuiCalendar::EditFieldControlRect(layout, GuiCalendar::EditField::EndTime, fieldRect));
+    EXPECT_EQ(fieldRect.left, layout.endEdit.left);
 }
 
 void CalendarTimeRangeParsingIsAtomicAndStrict() {

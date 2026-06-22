@@ -869,9 +869,24 @@ void MainWindow::DrawCalendarView(float W, float H) {
                         selected ? theme_.colors.focusRing : bc.edge, S(selected ? 1.6f : 1.0f));
 
         if (selected) {
-            DrawSurfaceFrame(ToD2DRect(editLayout.titleFrame), S(5), bc.fill, bc.edge, S(1));
-            DrawSurfaceFrame(ToD2DRect(editLayout.startFrame), S(5), bc.fill, bc.edge, S(1));
-            DrawSurfaceFrame(ToD2DRect(editLayout.endFrame), S(5), bc.fill, bc.edge, S(1));
+            auto focusField = [&]() {
+                switch (calendarEditFocus_) {
+                case CalendarEditFocus::StartTime: return GuiCalendar::EditField::StartTime;
+                case CalendarEditFocus::EndTime:   return GuiCalendar::EditField::EndTime;
+                case CalendarEditFocus::Title:
+                    break;
+                }
+                return GuiCalendar::EditField::Title;
+            };
+            auto drawEditFrame = [&](GuiCalendar::EditField field, const Gui::Rect& rect) {
+                const bool active = field == focusField();
+                DrawSurfaceFrame(ToD2DRect(rect), S(5), bc.fill,
+                                 active ? theme_.colors.focusRing : bc.edge,
+                                 S(active ? 1.5f : 1.0f));
+            };
+            drawEditFrame(GuiCalendar::EditField::Title, editLayout.titleFrame);
+            drawEditFrame(GuiCalendar::EditField::StartTime, editLayout.startFrame);
+            drawEditFrame(GuiCalendar::EditField::EndTime, editLayout.endFrame);
         } else {
             D2D1_RECT_F titleR = r;
             titleR.left += S(8);
@@ -1053,15 +1068,12 @@ void MainWindow::OnLButtonDown(float x, float y) {
     Hit h = HitTest(x, y);
     if (calendarActive()) {
         if (calendarEditing()) {
-            const bool sameBlock =
-                (h.kind == HitKind::CalendarBlock || h.kind == HitKind::CalendarResizeStart ||
-                 h.kind == HitKind::CalendarResizeEnd) && h.itemIndex == calendarEditId_;
-            if (!sameBlock && CalendarEditSurfaceContainsPoint(calendarEditId_, x, y)) {
+            if (CalendarEditSurfaceContainsPoint(calendarEditId_, x, y)) {
                 pressHit_ = Hit{};
                 FocusCalendarEditor(CalendarEditFocusFromPoint(calendarEditId_, x, y), false);
                 return;
             }
-            if (!sameBlock) EndCalendarEdit(true);
+            EndCalendarEdit(true);
         }
         pressHit_ = h;
         if (h.kind == HitKind::CalendarEmptyTimeline) {
@@ -1522,6 +1534,7 @@ void MainWindow::EndCalendarEdit(bool removeEmpty) {
     if (calendarTitleEdit_) calendar_.SetBlockTitle(blockId, ReadWindowText(calendarTitleEdit_));
     CommitCalendarTimeEdits(true);
     calendarEditId_ = -1;
+    calendarEditFocus_ = CalendarEditFocus::Title;
     HideCalendarEditors();
     if (removeEmpty && CalendarBlockTitleEmpty(blockId)) {
         calendar_.RemoveBlock(blockId);
@@ -1661,12 +1674,10 @@ MainWindow::CalendarEditFocus MainWindow::CalendarEditFocusFromPoint(int blockId
     case GuiCalendar::EditField::StartTime: return CalendarEditFocus::StartTime;
     case GuiCalendar::EditField::EndTime:   return CalendarEditFocus::EndTime;
     case GuiCalendar::EditField::Title:
+        return CalendarEditFocus::Title;
     case GuiCalendar::EditField::None:
-        break;
+        return CalendarEditFocus::Title;
     }
-    if (docY >= rect.top + S(22.0f))
-        return x >= layout.endFrame.left ? CalendarEditFocus::EndTime
-                                         : CalendarEditFocus::StartTime;
     return CalendarEditFocus::Title;
 }
 
@@ -1693,10 +1704,20 @@ void MainWindow::FocusCalendarEditor(CalendarEditFocus focus, bool selectAll) {
     if (focus == CalendarEditFocus::StartTime) target = calendarStartEdit_;
     else if (focus == CalendarEditFocus::EndTime) target = calendarEndEdit_;
     if (!target) return;
+    calendarEditFocus_ = focus;
     SetFocus(target);
     const int len = GetWindowTextLengthW(target);
     if (selectAll) SendMessageW(target, EM_SETSEL, 0, len);
     else SendMessageW(target, EM_SETSEL, len, len);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+bool MainWindow::IsCalendarEditorHwnd(HWND edit) const {
+    return edit == calendarTitleEdit_ || edit == calendarStartEdit_ || edit == calendarEndEdit_;
+}
+
+bool MainWindow::IsCalendarEditInternalFocusTarget(HWND target) const {
+    return target == hwnd_ || IsCalendarEditorHwnd(target);
 }
 
 bool MainWindow::CalendarBlockTitleEmpty(int blockId) const {
@@ -1725,6 +1746,14 @@ LRESULT CALLBACK MainWindow::CalendarEditProcStatic(HWND h, UINT m, WPARAM w, LP
     switch (m) {
     case WM_GETDLGCODE:
         return DefSubclassProc(h, m, w, l) | DLGC_WANTALLKEYS | DLGC_WANTTAB;
+    case WM_SETFOCUS:
+        self->calendarEditFocus_ = self->CalendarEditFocusFromHwnd(h);
+        InvalidateRect(self->hwnd_, nullptr, FALSE);
+        break;
+    case WM_LBUTTONDOWN:
+        self->calendarEditFocus_ = self->CalendarEditFocusFromHwnd(h);
+        InvalidateRect(self->hwnd_, nullptr, FALSE);
+        break;
     case WM_KEYDOWN:
         if (w == VK_ESCAPE) {
             self->EndCalendarEdit(true);
@@ -1745,7 +1774,7 @@ LRESULT CALLBACK MainWindow::CalendarEditProcStatic(HWND h, UINT m, WPARAM w, LP
         break;
     case WM_KILLFOCUS: {
         HWND next = reinterpret_cast<HWND>(w);
-        if (next == self->calendarTitleEdit_ || next == self->calendarStartEdit_ || next == self->calendarEndEdit_)
+        if (self->IsCalendarEditInternalFocusTarget(next))
             break;
         self->EndCalendarEdit(true);
         return 0;

@@ -68,6 +68,8 @@ HitResult HitTest(float x, float y, float scroll, float dpiScale, const Frame& f
                   const std::vector<BlockRect>& blocks);
 EditLayout ComputeEditLayout(const Gui::Rect& blockRect, float dpiScale);
 EditField HitTestEditField(float x, float y, const EditLayout& layout);
+bool EditFieldFrame(const EditLayout& layout, EditField field, Gui::Rect& frame);
+bool EditFieldControlRect(const EditLayout& layout, EditField field, Gui::Rect& rect);
 
 int MinuteFromPoint(float y, float scroll, const Frame& frame);
 int SnapMinute(int minute, int stepMinutes = 15);

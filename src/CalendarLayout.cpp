@@ -92,10 +92,10 @@ EditLayout ComputeEditLayout(const Gui::Rect& blockRect, float dpiScale) {
 
     const float padX = S(8.0f, dpiScale);
     const float padTop = S(7.0f, dpiScale);
-    const float frameInset = S(2.0f, dpiScale);
-    const float titleH = S(22.0f, dpiScale);
-    const float timeH = S(22.0f, dpiScale);
-    const float gapY = S(7.0f, dpiScale);
+    const float frameInset = S(1.0f, dpiScale);
+    const float titleH = S(24.0f, dpiScale);
+    const float timeH = S(24.0f, dpiScale);
+    const float gapY = S(8.0f, dpiScale);
     const float gapX = S(10.0f, dpiScale);
     const float minTimeW = S(44.0f, dpiScale);
     const float preferredTimeW = S(64.0f, dpiScale);
@@ -144,8 +144,48 @@ EditField HitTestEditField(float x, float y, const EditLayout& layout) {
     if (layout.startFrame.Contains(x, y)) return EditField::StartTime;
     if (layout.endFrame.Contains(x, y)) return EditField::EndTime;
     if (layout.titleFrame.Contains(x, y)) return EditField::Title;
-    if (layout.block.Contains(x, y)) return EditField::Title;
+    if (layout.block.Contains(x, y)) {
+        if (y >= layout.titleFrame.bottom) {
+            const float split = (layout.startFrame.right + layout.endFrame.left) * 0.5f;
+            return x < split ? EditField::StartTime : EditField::EndTime;
+        }
+        return EditField::Title;
+    }
     return EditField::None;
+}
+
+bool EditFieldFrame(const EditLayout& layout, EditField field, Gui::Rect& frame) {
+    switch (field) {
+    case EditField::Title:
+        frame = layout.titleFrame;
+        return true;
+    case EditField::StartTime:
+        frame = layout.startFrame;
+        return true;
+    case EditField::EndTime:
+        frame = layout.endFrame;
+        return true;
+    case EditField::None:
+        break;
+    }
+    return false;
+}
+
+bool EditFieldControlRect(const EditLayout& layout, EditField field, Gui::Rect& rect) {
+    switch (field) {
+    case EditField::Title:
+        rect = layout.titleEdit;
+        return true;
+    case EditField::StartTime:
+        rect = layout.startEdit;
+        return true;
+    case EditField::EndTime:
+        rect = layout.endEdit;
+        return true;
+    case EditField::None:
+        break;
+    }
+    return false;
 }
 
 int MinuteFromPoint(float y, float scroll, const Frame& frame) {

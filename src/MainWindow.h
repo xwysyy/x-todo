@@ -164,6 +164,8 @@ private:
     CalendarEditFocus CalendarEditFocusFromHwnd(HWND edit) const;
     CalendarEditFocus NextCalendarEditFocus(HWND edit, bool reverse) const;
     void FocusCalendarEditor(CalendarEditFocus focus, bool selectAll);
+    bool IsCalendarEditorHwnd(HWND edit) const;
+    bool IsCalendarEditInternalFocusTarget(HWND target) const;
     bool CalendarBlockTitleEmpty(int blockId) const;
     void ResetCalendarDrag();
     void CancelCalendarCapture();
@@ -348,4 +350,5 @@ private:
     HWND   calendarStartEdit_ = nullptr;
     HWND   calendarEndEdit_ = nullptr;
     int    calendarEditId_ = -1;
+    CalendarEditFocus calendarEditFocus_ = CalendarEditFocus::Title;
 };
