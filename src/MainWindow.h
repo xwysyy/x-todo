@@ -79,6 +79,7 @@ private:
         Calendar,
         ListTab,
         AddList,
+        AddTask,
         CalendarPrevDay,
         CalendarNextDay,
         CalendarToday,
@@ -109,7 +110,8 @@ private:
     void DrawListTabs();
     void DrawCalendarView(float windowWidth, float windowHeight);
     void DrawSection(); // 已完成折叠条（内容层，文档坐标）
-    void DrawEmptyActivePrompt(bool hovered); // 当前列表没有未完成项时的点击入口
+    void DrawEmptyActivePrompt(bool hovered); // 空列表的居中提示（图标 + 文案 + 新建按钮）
+    void DrawAddTaskRow(bool hovered);        // 列表底部常驻"新建待办"入口
     void FillRect(const D2D1_RECT_F& r, uint32_t rgb, float a = 1.0f);
     void StrokeRect(const D2D1_RECT_F& r, uint32_t rgb, float w, float a = 1.0f);
     void FillRoundRect(const D2D1_ROUNDED_RECT& rr, uint32_t rgb, float a = 1.0f);
@@ -224,6 +226,7 @@ private:
     void ToggleCompletedExpanded();
     void ToggleAutostart();
     void CreateEmptyActiveItem();
+    void BeginNewTask(); // 新建一条待办并进入编辑（不受当前是否已有未完成项限制）
     void DeleteItem(int itemIndex);
     void ClearCompletedConfirm();
     void HideToTray();
@@ -272,7 +275,8 @@ private:
     float       scroll_       = 0.0f;
     float       contentH_     = 0.0f;
     float       activeEndY_   = 0.0f; // 未完成段末尾 y，用于拖拽插入线
-    D2D1_RECT_F emptyActiveRect_{}; // 当前列表没有未完成项时的点击入口（文档坐标）
+    D2D1_RECT_F emptyActiveRect_{}; // 空列表居中提示区域（文档坐标）
+    D2D1_RECT_F addTaskRect_{};     // 列表底部"新建待办"入口（文档坐标）
     D2D1_RECT_F sectionRect_{}; // 已完成折叠条（文档坐标）
     D2D1_RECT_F clearRect_{};   // 清空已完成（文档坐标）
     D2D1_RECT_F pinRect_{};     // 置顶按钮（固定）
@@ -332,6 +336,7 @@ private:
 
     HFONT  editFont_ = nullptr; // 行内编辑框字体
     HBRUSH editBg_   = nullptr; // 行内编辑框背景刷（贴合纸张色）
+    HBRUSH calendarEditBg_ = nullptr; // 日历块编辑框背景刷（字段抬升色）
     HWND   calendarTitleEdit_ = nullptr;
     HWND   calendarStartEdit_ = nullptr;
     HWND   calendarEndEdit_ = nullptr;

@@ -35,6 +35,7 @@ std::wstring Trim(const std::wstring& s) {
 
 int RoundToInt(float v) { return (int)(v >= 0.0f ? v + 0.5f : v - 0.5f); }
 constexpr int kHoverEmptyActive = -2;
+constexpr int kHoverAddTask = -3;
 
 std::wstring ReadWindowText(HWND hwnd) {
     int len = GetWindowTextLengthW(hwnd);
@@ -206,6 +207,7 @@ void MainWindow::RebuildLayout() {
     calendarBlockRects_.clear();
     activeEndY_ = 0.0f;
     emptyActiveRect_ = D2D1::RectF(0, 0, 0, 0);
+    addTaskRect_ = D2D1::RectF(0, 0, 0, 0);
     addListRect_ = D2D1::RectF(0, 0, 0, 0);
 
     RECT rc;
@@ -254,10 +256,12 @@ void MainWindow::RebuildLayout() {
     }
 
     activeEndY_ = docY;
-    if (active == 0) {
+    if (total == 0) {
+        // 空列表：占满视口的居中提示（图标 + 文案 + 新建按钮）。
         emptyActiveRect_ = ToD2DRect(GuiLayout::ComputeEmptyActivePrompt(
-            W, docY, ViewportHeight(), total == 0, dpiScale()));
-        docY = emptyActiveRect_.bottom;
+            W, ViewportHeight(), dpiScale()));
+    } else {
+        emptyActiveRect_ = D2D1::RectF(0, 0, 0, 0);
     }
 
     if (total - active > 0) {
@@ -273,6 +277,15 @@ void MainWindow::RebuildLayout() {
     } else {
         sectionRect_ = D2D1::RectF(0, 0, 0, 0);
         clearRect_   = D2D1::RectF(0, 0, 0, 0);
+    }
+
+    if (total > 0) {
+        // 非空列表底部常驻"新建待办"入口。
+        docY += S(6);
+        addTaskRect_ = D2D1::RectF(pad, docY, W - pad, docY + S(36));
+        docY = addTaskRect_.bottom + S(8);
+    } else {
+        addTaskRect_ = D2D1::RectF(0, 0, 0, 0);
     }
     contentH_ = docY;
 
@@ -397,6 +410,11 @@ MainWindow::Hit MainWindow::HitTest(float x, float y) {
 
     if (emptyActiveRect_.bottom > emptyActiveRect_.top && InRect(emptyActiveRect_, dp)) {
         h.kind = HitKind::EmptyActive;
+        return h;
+    }
+
+    if (addTaskRect_.bottom > addTaskRect_.top && InRect(addTaskRect_, dp)) {
+        h.kind = HitKind::AddTask;
         return h;
     }
 
@@ -699,30 +717,61 @@ void MainWindow::DrawListTabs() {
 void MainWindow::DrawEmptyActivePrompt(bool hovered) {
     if (emptyActiveRect_.bottom <= emptyActiveRect_.top) return;
 
-    const bool emptyList = model_.Count() == 0;
-    if (emptyList) {
-        const float radius = S(8);
-        DrawSurfaceFrame(emptyActiveRect_, radius,
-                         hovered ? theme_.colors.rowHover : theme_.colors.paper,
-                         hovered ? theme_.colors.focusRing : theme_.colors.paperEdge,
-                         hovered ? S(1.2f) : S(1.0f));
+    const float cx = (emptyActiveRect_.left + emptyActiveRect_.right) / 2.0f;
+    const float cy = (emptyActiveRect_.top + emptyActiveRect_.bottom) / 2.0f;
 
-        D2D1_RECT_F titleRect = emptyActiveRect_;
-        titleRect.bottom = (emptyActiveRect_.top + emptyActiveRect_.bottom) / 2.0f;
-        titleRect.top += S(12);
-        Text(T(Str::EmptyListTitle, lang_), titleRect, theme_.colors.text, textFormat_);
-
-        D2D1_RECT_F promptRect = emptyActiveRect_;
-        promptRect.top = titleRect.bottom - S(2);
-        promptRect.bottom -= S(12);
-        Text(T(Str::EmptyActivePrompt, lang_), promptRect,
-             hovered ? theme_.colors.checkFill : theme_.colors.textWeak, smallFormat_);
-        return;
+    // 图标卡片（清单方块）
+    D2D1_RECT_F badge = D2D1::RectF(cx - S(26), cy - S(86), cx + S(26), cy - S(34));
+    DrawSurfaceFrame(badge, S(14), theme_.colors.paper, theme_.colors.paperEdge, S(1));
+    brush_->SetColor(Theme::D2DColor(theme_.colors.disabledText));
+    const float ix = (badge.left + badge.right) / 2.0f;
+    const float iy = (badge.top + badge.bottom) / 2.0f;
+    D2D1_RECT_F sheet = D2D1::RectF(ix - S(9), iy - S(11), ix + S(9), iy + S(11));
+    rt_->DrawRoundedRectangle(D2D1_ROUNDED_RECT{ sheet, S(2.5f), S(2.5f) }, brush_, S(1.5f));
+    for (int i = 0; i < 2; ++i) {
+        const float ly = iy - S(2) + i * S(6);
+        rt_->DrawLine(D2D1::Point2F(sheet.left + S(4), ly), D2D1::Point2F(sheet.right - S(3), ly), brush_, S(1.4f));
     }
 
-    if (hovered) FillRect(emptyActiveRect_, theme_.colors.rowHover);
-    Text(T(Str::EmptyActivePrompt, lang_), emptyActiveRect_,
-         hovered ? theme_.colors.checkFill : theme_.colors.textWeak, smallFormat_);
+    // 标题
+    D2D1_RECT_F titleR = D2D1::RectF(emptyActiveRect_.left, cy - S(28), emptyActiveRect_.right, cy - S(6));
+    textFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    Text(T(Str::EmptyListTitle, lang_), titleR, theme_.colors.text, textFormat_);
+    textFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+
+    // 副说明
+    D2D1_RECT_F subR = D2D1::RectF(emptyActiveRect_.left, cy - S(4), emptyActiveRect_.right, cy + S(16));
+    smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    Text(T(Str::EmptyActivePrompt, lang_), subR, theme_.colors.textWeak, smallFormat_);
+
+    // 新建按钮
+    const float bw = S(132), bh = S(34);
+    D2D1_RECT_F cta = D2D1::RectF(cx - bw / 2.0f, cy + S(28), cx + bw / 2.0f, cy + S(28) + bh);
+    DrawSurfaceFrame(cta, S(8), hovered ? theme_.colors.checkFillHover : theme_.colors.checkFill,
+                     theme_.colors.checkFill, S(1));
+    Text(T(Str::NewTask, lang_), cta, theme_.colors.checkMark, smallFormat_);
+    smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+}
+
+void MainWindow::DrawAddTaskRow(bool hovered) {
+    if (addTaskRect_.bottom <= addTaskRect_.top) return;
+
+    const uint32_t edge = hovered ? theme_.colors.checkFill : theme_.colors.paperEdge;
+    const uint32_t fg   = hovered ? theme_.colors.checkFill : theme_.colors.textWeak;
+    D2D1_ROUNDED_RECT rr{ addTaskRect_, S(8), S(8) };
+    if (hovered)
+        FillRoundRect(rr, Theme::Blend(theme_.colors.checkFill, theme_.colors.paper, 0.10f));
+    StrokeRoundRect(rr, edge, S(1.2f));
+
+    // 居中的 "+ 新建待办"
+    const float cy = (addTaskRect_.top + addTaskRect_.bottom) / 2.0f;
+    const float plusX = (addTaskRect_.left + addTaskRect_.right) / 2.0f - S(36);
+    brush_->SetColor(Theme::D2DColor(fg));
+    rt_->DrawLine(D2D1::Point2F(plusX - S(5), cy), D2D1::Point2F(plusX + S(5), cy), brush_, S(1.6f));
+    rt_->DrawLine(D2D1::Point2F(plusX, cy - S(5)), D2D1::Point2F(plusX, cy + S(5)), brush_, S(1.6f));
+    D2D1_RECT_F textR = addTaskRect_;
+    textR.left = plusX + S(11);
+    Text(T(Str::NewTask, lang_), textR, fg, smallFormat_);
 }
 
 void MainWindow::DrawCalendarView(float W, float H) {
@@ -810,13 +859,28 @@ void MainWindow::DrawCalendarView(float W, float H) {
             conflict ? CalendarTheme::kConflict : CalendarTheme::BlockColorAt(idx);
 
         D2D1_RECT_F r = ToD2DRect(blockRect.rect);
+        // 编辑态把块撑高，容纳标题输入 + 时间行，避免输入框溢出块外。
+        if (selected) {
+            const float minH = S(54);
+            if (r.bottom < r.top + minH) r.bottom = r.top + minH;
+        }
         const float radius = S(7);
         FillRoundRect(D2D1_ROUNDED_RECT{ r, radius, radius }, bc.fill);
         StrokeRoundRect(D2D1_ROUNDED_RECT{ r, radius, radius },
                         selected ? theme_.colors.focusRing : bc.edge, S(selected ? 1.6f : 1.0f));
 
-        // 编辑中由原生 EDIT 控件覆盖文字，跳过自绘以免重影。
-        if (!selected) {
+        if (selected) {
+            // 输入框边框（与 LayoutCalendarEditControls 的几何对齐，文字由原生 EDIT 绘制）。
+            auto frame = [&](float x0, float y0, float w, float hh) {
+                D2D1_RECT_F f = D2D1::RectF(r.left + x0 - S(1), r.top + y0 - S(1),
+                                            r.left + x0 + w + S(1), r.top + y0 + hh + S(1));
+                StrokeRoundRect(D2D1_ROUNDED_RECT{ f, S(5), S(5) }, theme_.colors.paperEdge, S(1));
+            };
+            const float fullW = (r.right - r.left) - S(16);
+            frame(S(8), S(4), fullW, S(20));                 // 标题
+            frame(S(8), S(26), S(54), S(18));                // 开始时间
+            frame(S(8) + S(54) + S(5), S(26), S(54), S(18)); // 结束时间
+        } else {
             D2D1_RECT_F titleR = r;
             titleR.left += S(8);
             titleR.right -= S(8);
@@ -887,6 +951,7 @@ bool MainWindow::Render() {
         for (size_t i = 0; i < rows_.size(); i++)
             DrawRow(rows_[i], (int)i == hoverRow_);
         DrawSection();
+        DrawAddTaskRow(hoverRow_ == kHoverAddTask);
 
         if (dragging_ && dragInsert_ >= 0) {
             float yy = activeEndY_;
@@ -1130,6 +1195,9 @@ void MainWindow::OnLButtonUp(float x, float y) {
     case HitKind::EmptyActive:
         CreateEmptyActiveItem();
         break;
+    case HitKind::AddTask:
+        BeginNewTask();
+        break;
     case HitKind::Menu:    ShowTitleMenu();           break;
     case HitKind::Theme:   ShowThemeMenu();           break;
     case HitKind::Pin:     TogglePin();               break;
@@ -1233,7 +1301,9 @@ void MainWindow::OnMouseMove(float x, float y, bool lButton) {
         return;
     }
     Hit h = HitTest(x, y);
-    int hover = (h.kind == HitKind::EmptyActive) ? kHoverEmptyActive : h.rowIndex;
+    int hover = (h.kind == HitKind::EmptyActive) ? kHoverEmptyActive
+              : (h.kind == HitKind::AddTask)     ? kHoverAddTask
+              : h.rowIndex;
     if (hover != hoverRow_) {
         hoverRow_ = hover;
         InvalidateRect(hwnd_, nullptr, FALSE);
@@ -1406,6 +1476,9 @@ void MainWindow::EnsureCalendarEditors() {
     createEdit(calendarTitleEdit_, ES_AUTOHSCROLL);
     createEdit(calendarStartEdit_, ES_AUTOHSCROLL | ES_CENTER);
     createEdit(calendarEndEdit_, ES_AUTOHSCROLL | ES_CENTER);
+    // 空标题显示占位提示，避免只剩一根光标
+    SendMessageW(calendarTitleEdit_, EM_SETCUEBANNER, TRUE,
+                 (LPARAM)(lang_ == Lang::Zh ? L"内容" : L"Title"));
 }
 
 void MainWindow::BeginCalendarEdit(int blockId, bool selectTitle) {

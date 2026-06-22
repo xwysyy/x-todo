@@ -17,9 +17,10 @@ const wchar_t* T(Str key, Lang lang) {
         case Str::Exit:          return zh ? L"退出"            : L"Exit";
         case Str::Calendar:      return zh ? L"日历"            : L"Calendar";
         case Str::CalendarToday: return zh ? L"今天"            : L"Today";
-        case Str::EmptyListTitle:return zh ? L"当前列表为空"    : L"This list is empty";
+        case Str::EmptyListTitle:return zh ? L"这个列表还没有待办" : L"No tasks here yet";
         case Str::EmptyActivePrompt:
-                                  return zh ? L"点击创建第一条" : L"Click to create the first item";
+                                  return zh ? L"新建一条，开始安排要做的事" : L"Add one to start planning.";
+        case Str::NewTask:       return zh ? L"新建待办"        : L"New task";
         case Str::ListNamePrompt:return zh ? L"标签页名称"      : L"List name";
         case Str::ListDefault:   return zh ? L"默认"            : L"Inbox";
         case Str::ListRename:    return zh ? L"重命名标签页"    : L"Rename list";

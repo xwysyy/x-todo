@@ -13,7 +13,7 @@ namespace {
         Str::Show, Str::ModeNormal, Str::ModeDesktop, Str::ModeCapsule,
         Str::StyleSlim, Str::StyleDot, Str::Autostart, Str::ToggleLang,
     Str::Exit, Str::Calendar, Str::CalendarToday,
-    Str::EmptyListTitle, Str::EmptyActivePrompt, Str::ListNamePrompt,
+    Str::EmptyListTitle, Str::EmptyActivePrompt, Str::NewTask, Str::ListNamePrompt,
     Str::ListDefault, Str::ListRename, Str::ListDelete,
     Str::ListDeleteMsg, Str::Completed, Str::Clear, Str::DeleteItemMsg,
     Str::ClearAllMsg, Str::ConfirmOk, Str::ConfirmCancel, Str::LoadFailedMsg,

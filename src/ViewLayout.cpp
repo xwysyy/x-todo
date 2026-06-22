@@ -99,14 +99,13 @@ RowControls ComputeRowControls(float windowWidth, float docY, float rowHeight, i
     return out;
 }
 
-Gui::Rect ComputeEmptyActivePrompt(float windowWidth, float docY, float viewportHeight,
-                                   bool listEmpty, float dpiScale) {
-    (void)viewportHeight;
+// 空列表提示占满内容视口，渲染层在其中居中绘制图标 / 文案 / 新建按钮。
+Gui::Rect ComputeEmptyActivePrompt(float windowWidth, float viewportHeight, float dpiScale) {
     const float pad = S(Theme::kPadX, dpiScale);
-    const float top = listEmpty ? docY + S(12.0f, dpiScale) : docY;
-    // 空列表只给一张紧凑的提示卡片，不再撑满整个视口。
-    const float height = listEmpty ? S(76.0f, dpiScale) : S(Theme::kRowH, dpiScale);
-    return Gui::Rect{ pad, top, windowWidth - pad, top + height };
+    float height = viewportHeight;
+    const float minHeight = S(160.0f, dpiScale);
+    if (height < minHeight) height = minHeight;
+    return Gui::Rect{ pad, 0.0f, windowWidth - pad, height };
 }
 
 RowHit HitTestRowControls(const RowControls& row, float x, float docY, bool hasChildren, bool completed) {

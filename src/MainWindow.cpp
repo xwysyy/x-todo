@@ -1214,6 +1214,7 @@ void MainWindow::ApplyResolvedTheme(bool persist) {
 
     // 编辑框背景刷随主题失效，下次 WM_CTLCOLOREDIT 按新主题重建
     if (editBg_) { DeleteObject(editBg_); editBg_ = nullptr; }
+    if (calendarEditBg_) { DeleteObject(calendarEditBg_); calendarEditBg_ = nullptr; }
     if (edit_ && IsWindow(edit_) && IsWindowVisible(edit_))
         InvalidateRect(edit_, nullptr, TRUE);
     if (calendarTitleEdit_ && IsWindow(calendarTitleEdit_) && IsWindowVisible(calendarTitleEdit_))
@@ -1519,8 +1520,16 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_CTLCOLOREDIT: {
         HDC hdc = (HDC)wp;
-        SetBkColor(hdc, Theme::GdiColor(theme_.colors.paper));
+        const HWND ctl = (HWND)lp;
+        const bool cal = (ctl == calendarTitleEdit_ || ctl == calendarStartEdit_ ||
+                          ctl == calendarEndEdit_);
+        const uint32_t bg = cal ? theme_.colors.paperElevated : theme_.colors.paper;
+        SetBkColor(hdc, Theme::GdiColor(bg));
         SetTextColor(hdc, Theme::GdiColor(theme_.colors.text));
+        if (cal) {
+            if (!calendarEditBg_) calendarEditBg_ = CreateSolidBrush(Theme::GdiColor(bg));
+            return (LRESULT)calendarEditBg_;
+        }
         if (!editBg_) editBg_ = CreateSolidBrush(Theme::GdiColor(theme_.colors.paper));
         return (LRESULT)editBg_;
     }
@@ -2221,6 +2230,18 @@ void MainWindow::CreateEmptyActiveItem() {
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
+void MainWindow::BeginNewTask() {
+    if (editing()) CommitEdit(false);
+
+    int n = model_.AddActive(L"", 0);
+    RebuildLayout();
+    ScrollItemIntoView(n);
+    RefreshTrayIcon();
+    ScheduleSave();
+    BeginEdit(n);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
 bool MainWindow::Confirm(Str message, UINT icon) {
     (void)icon;
     return ShowThemedConfirm(hwnd_, T(message, lang_), lang_, true, theme_, d2dFactory_, dwrite_);
@@ -2280,6 +2301,7 @@ void MainWindow::ExitApp() {
     RemoveTrayIcon();
     if (editFont_) { DeleteObject(editFont_); editFont_ = nullptr; }
     if (editBg_)   { DeleteObject(editBg_);   editBg_   = nullptr; }
+    if (calendarEditBg_) { DeleteObject(calendarEditBg_); calendarEditBg_ = nullptr; }
     if (calendarTitleEdit_) { DestroyWindow(calendarTitleEdit_); calendarTitleEdit_ = nullptr; }
     if (calendarStartEdit_) { DestroyWindow(calendarStartEdit_); calendarStartEdit_ = nullptr; }
     if (calendarEndEdit_)   { DestroyWindow(calendarEndEdit_);   calendarEndEdit_ = nullptr; }

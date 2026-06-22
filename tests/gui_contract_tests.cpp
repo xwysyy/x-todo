@@ -229,19 +229,17 @@ void TabStripNeverOverlapsAddList() {
     EXPECT_TRUE(strip.tabs.size() < metrics.size());
 }
 
-void EmptyActivePromptIsCompactForEmptyList() {
-    // Empty list shows a compact card, not a viewport-filling block.
-    const Gui::Rect empty = GuiLayout::ComputeEmptyActivePrompt(260.0f, 0.0f, 260.0f, true, 1.0f);
-    EXPECT_EQ(empty.left, 14.0f);
-    EXPECT_EQ(empty.top, 12.0f);
-    EXPECT_EQ(empty.right, 246.0f);
-    EXPECT_EQ(empty.bottom, 88.0f);
+void EmptyActivePromptFillsViewportForCentering() {
+    // Empty list region spans the content viewport; the prompt is centered within it.
+    const Gui::Rect r = GuiLayout::ComputeEmptyActivePrompt(260.0f, 400.0f, 1.0f);
+    EXPECT_EQ(r.left, 14.0f);
+    EXPECT_EQ(r.top, 0.0f);
+    EXPECT_EQ(r.right, 246.0f);
+    EXPECT_EQ(r.bottom, 400.0f);
 
-    const Gui::Rect completedOnly = GuiLayout::ComputeEmptyActivePrompt(260.0f, 17.0f, 260.0f, false, 1.0f);
-    EXPECT_EQ(completedOnly.left, 14.0f);
-    EXPECT_EQ(completedOnly.top, 17.0f);
-    EXPECT_EQ(completedOnly.right, 246.0f);
-    EXPECT_EQ(completedOnly.bottom, 51.0f);
+    // A very short viewport still gets a usable minimum height.
+    const Gui::Rect tiny = GuiLayout::ComputeEmptyActivePrompt(260.0f, 80.0f, 1.0f);
+    EXPECT_EQ(tiny.bottom, 160.0f);
 }
 
 void RowLayoutKeepsIndentControlsAndHitTestingInLockstep() {
@@ -450,7 +448,7 @@ const TestCase kTests[] = {
     {"TitleButtonLayoutOrdersActionsAndStaysInsideWindow", TitleButtonLayoutOrdersActionsAndStaysInsideWindow},
     {"ChromeHitTestCoversTitleButtonsTabsAndAddList", ChromeHitTestCoversTitleButtonsTabsAndAddList},
     {"TabStripNeverOverlapsAddList", TabStripNeverOverlapsAddList},
-    {"EmptyActivePromptIsCompactForEmptyList", EmptyActivePromptIsCompactForEmptyList},
+    {"EmptyActivePromptFillsViewportForCentering", EmptyActivePromptFillsViewportForCentering},
     {"RowLayoutKeepsIndentControlsAndHitTestingInLockstep", RowLayoutKeepsIndentControlsAndHitTestingInLockstep},
     {"EditIntentMapsKeyboardWithoutLeakingControlCharacters", EditIntentMapsKeyboardWithoutLeakingControlCharacters},
     {"TitleAndTrayMenusDoNotExposeListManagementCommands", TitleAndTrayMenusDoNotExposeListManagementCommands},

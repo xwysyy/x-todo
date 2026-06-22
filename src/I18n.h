@@ -15,8 +15,9 @@ enum class Str {
     Exit,         // 退出
     Calendar,     // 日历标签
     CalendarToday,// 日历回到今天按钮
-    EmptyListTitle,// 当前列表为空
-    EmptyActivePrompt,// 点击创建第一条
+    EmptyListTitle,// 空列表标题
+    EmptyActivePrompt,// 空列表副说明
+    NewTask,       // 新建待办按钮
     ListNamePrompt,// 标签页名称输入提示
     ListDefault,  // 默认标签名
     ListRename,   // 重命名标签页
