@@ -978,11 +978,20 @@ void MainWindow::DrawCalendarHeader(const GuiCalendar::HeaderLayout& header, con
         return d;
     };
 
-    // Grouped nav chevrons (no boxes, kept subtle).
-    smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-    Text(L"‹", off(header.prev), theme_.colors.textWeak, smallFormat_);
-    Text(L"›", off(header.next), theme_.colors.textWeak, smallFormat_);
-    smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    // Grouped nav chevrons, drawn as vector strokes so they read clearly at any DPI.
+    auto chevron = [&](const Gui::Rect& r, bool pointLeft) {
+        const D2D1_RECT_F d = off(r);
+        const float cx = (d.left + d.right) * 0.5f;
+        const float cy = (d.top + d.bottom) * 0.5f;
+        const float a = S(5.5f);
+        const float tipX = pointLeft ? cx - a * 0.55f : cx + a * 0.55f;
+        const float armX = pointLeft ? cx + a * 0.55f : cx - a * 0.55f;
+        brush_->SetColor(Theme::D2DColor(theme_.colors.text));
+        rt_->DrawLine(D2D1::Point2F(armX, cy - a), D2D1::Point2F(tipX, cy), brush_, S(2.0f));
+        rt_->DrawLine(D2D1::Point2F(tipX, cy), D2D1::Point2F(armX, cy + a), brush_, S(2.0f));
+    };
+    chevron(header.prev, true);
+    chevron(header.next, false);
 
     if (header.titleVisible && !title.empty())
         Text(title, off(header.title), theme_.colors.text, textFormat_);
