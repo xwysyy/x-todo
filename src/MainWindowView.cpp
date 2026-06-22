@@ -833,7 +833,9 @@ void MainWindow::DrawCalendarView(float W, float H) {
         if (onHour && half / 2 < 24) {
             wchar_t buf[8];
             swprintf_s(buf, L"%02d:00", half / 2);
-            D2D1_RECT_F label = D2D1::RectF(S(7), y - S(8), frame.gutter.right - S(7), y + S(12));
+            // 0 点标签放到刻度线下方，避免被时间轴顶边裁掉；其余整点仍跨线居中。
+            const float labTop = (half == 0) ? y + S(2) : y - S(8);
+            D2D1_RECT_F label = D2D1::RectF(S(7), labTop, frame.gutter.right - S(7), labTop + S(20));
             smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
             Text(buf, label, theme_.colors.textWeak, smallFormat_);
             smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
@@ -859,11 +861,8 @@ void MainWindow::DrawCalendarView(float W, float H) {
             conflict ? CalendarTheme::kConflict : CalendarTheme::BlockColorAt(idx);
 
         D2D1_RECT_F r = ToD2DRect(blockRect.rect);
-        // 编辑态把块撑高，容纳标题输入 + 时间行，避免输入框溢出块外。
-        if (selected) {
-            const float minH = S(54);
-            if (r.bottom < r.top + minH) r.bottom = r.top + minH;
-        }
+        // 编辑态收成固定高度的紧凑编辑卡片：不随时间长度铺满，避免大块里浮着小输入框。
+        if (selected) r.bottom = r.top + S(72);
         const float radius = S(7);
         FillRoundRect(D2D1_ROUNDED_RECT{ r, radius, radius }, bc.fill);
         StrokeRoundRect(D2D1_ROUNDED_RECT{ r, radius, radius },
@@ -871,15 +870,22 @@ void MainWindow::DrawCalendarView(float W, float H) {
 
         if (selected) {
             // 输入框边框（与 LayoutCalendarEditControls 的几何对齐，文字由原生 EDIT 绘制）。
+            const float fy = S(6);   // 标题 top（对齐 LayoutCalendarEditControls）
+            const float ty = S(30);  // 时间行 top
             auto frame = [&](float x0, float y0, float w, float hh) {
                 D2D1_RECT_F f = D2D1::RectF(r.left + x0 - S(1), r.top + y0 - S(1),
                                             r.left + x0 + w + S(1), r.top + y0 + hh + S(1));
-                StrokeRoundRect(D2D1_ROUNDED_RECT{ f, S(5), S(5) }, theme_.colors.paperEdge, S(1));
+                StrokeRoundRect(D2D1_ROUNDED_RECT{ f, S(5), S(5) }, theme_.colors.checkBorder, S(1));
             };
             const float fullW = (r.right - r.left) - S(16);
-            frame(S(8), S(4), fullW, S(20));                 // 标题
-            frame(S(8), S(26), S(54), S(18));                // 开始时间
-            frame(S(8) + S(54) + S(5), S(26), S(54), S(18)); // 结束时间
+            frame(S(8), fy, fullW, S(22));                 // 标题
+            frame(S(8), ty, S(58), S(20));                 // 开始时间
+            frame(S(8) + S(58) + S(8), ty, S(58), S(20));  // 结束时间
+            // 两个时间框之间的分隔
+            const float sepX = r.left + S(8) + S(58) + S(4);
+            const float sepY = r.top + ty + S(10);
+            brush_->SetColor(Theme::D2DColor(theme_.colors.textWeak));
+            rt_->DrawLine(D2D1::Point2F(sepX - S(3), sepY), D2D1::Point2F(sepX + S(3), sepY), brush_, S(1.3f));
         } else {
             D2D1_RECT_F titleR = r;
             titleR.left += S(8);
@@ -1259,9 +1265,10 @@ void MainWindow::OnMouseMove(float x, float y, bool lButton) {
             const GuiCalendar::TimeRange range = GuiCalendar::RangeFromDrag(calendarDrag_.anchorMinute, minute);
             changed = calendar_.SetBlockRange(calendarDrag_.blockId, range.startMinute, range.endMinute);
         } else if (calendarDrag_.mode == CalendarDragMode::Moving) {
+            // 按实际位移自由移动，再把结果整体吸附到 15 分，而不是以 15 分为步长。
             const int duration = calendarDrag_.originalEnd - calendarDrag_.originalStart;
-            int delta = GuiCalendar::SnapMinute(minute) - GuiCalendar::SnapMinute(calendarDrag_.anchorMinute);
-            int start = calendarDrag_.originalStart + delta;
+            int start = GuiCalendar::SnapMinute(
+                calendarDrag_.originalStart + (minute - calendarDrag_.anchorMinute));
             if (start < 0) start = 0;
             if (start + duration > 1440) start = 1440 - duration;
             if (start < 0) start = 0;
@@ -1551,15 +1558,16 @@ void MainWindow::LayoutCalendarEditControls() {
     }
     if (!found) { HideCalendarEditors(); return; }
 
+    // 几何与 DrawCalendarView 的编辑卡片输入框边框一一对齐。
     const float clientTop = ContentTop() + calendarFrame_.timelineViewport.top - calendarScroll_;
     const int left = RoundToInt(rect.left + S(8));
     const int width = RoundToInt(rect.right - rect.left - S(16));
-    const int titleTop = RoundToInt(clientTop + rect.top + S(4));
-    const int titleH = RoundToInt(S(20));
-    const int timeW = RoundToInt(S(54));
-    const int timeH = RoundToInt(S(18));
-    const int gap = RoundToInt(S(5));
-    const int timeTop = titleTop + titleH + RoundToInt(S(2));
+    const int titleTop = RoundToInt(clientTop + rect.top + S(6));
+    const int titleH = RoundToInt(S(22));
+    const int timeW = RoundToInt(S(58));
+    const int timeH = RoundToInt(S(20));
+    const int gap = RoundToInt(S(8));
+    const int timeTop = RoundToInt(clientTop + rect.top + S(30));
 
     const int viewportTop = RoundToInt(ContentTop() + calendarFrame_.timelineViewport.top);
     const int viewportBottom = RoundToInt(ContentTop() + calendarFrame_.timelineViewport.bottom);
