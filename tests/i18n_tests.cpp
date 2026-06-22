@@ -14,6 +14,7 @@ namespace {
         Str::StyleSlim, Str::StyleDot, Str::Autostart, Str::ToggleLang,
     Str::Exit, Str::Calendar, Str::CalendarToday,
     Str::CalendarModeDay, Str::CalendarModeWeek, Str::CalendarModeMonth,
+    Str::CalendarBlockDelete, Str::CalendarBlockDeleteMsg,
     Str::EmptyListTitle, Str::EmptyActivePrompt, Str::NewTask, Str::ListNamePrompt,
     Str::ListDefault, Str::ListRename, Str::ListDelete,
     Str::ListDeleteMsg, Str::Completed, Str::Clear, Str::DeleteItemMsg,

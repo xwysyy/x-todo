@@ -919,12 +919,13 @@ void MainWindow::DrawCalendarDay(float W, float H) {
         ++idx;
     }
 
-    // 当前时间线浮于事件块之上，避免被不透明块盖住。
+    // 当前时间线浮于事件块之上但半透明，跨在块上时不喧宾夺主；端点圆点保持实心作锚点。
     if (calendarDay_ == TodayDayKey()) {
         const float y = (static_cast<float>(CurrentMinuteOfDay()) / 1440.0f) * frame.contentHeight;
-        brush_->SetColor(Theme::D2DColor(theme_.colors.focusRing));
+        brush_->SetColor(Theme::D2DColor(theme_.colors.focusRing, 0.5f));
         rt_->DrawLine(D2D1::Point2F(frame.lane.left, y),
-                      D2D1::Point2F(frame.lane.right, y), brush_, S(1.4f));
+                      D2D1::Point2F(frame.lane.right, y), brush_, S(1.2f));
+        brush_->SetColor(Theme::D2DColor(theme_.colors.focusRing));
         rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(frame.lane.left, y), S(3), S(3)), brush_);
     }
 
@@ -1127,14 +1128,14 @@ void MainWindow::DrawCalendarWeek(float W, float H) {
         ++idx;
     }
 
-    // 当前时间线浮于事件块之上，避免被不透明块盖住。
+    // 当前时间线浮于事件块之上但半透明，跨在块上时不喧宾夺主。
     if (haveWeek) {
         for (int i = 0; i < 7; ++i) {
             if (CalendarDate::Format(CalendarDate::AddDays(weekStart, i)) != todayKey) continue;
             const float y = (static_cast<float>(CurrentMinuteOfDay()) / 1440.0f) * frame.contentHeight;
-            brush_->SetColor(Theme::D2DColor(theme_.colors.focusRing));
+            brush_->SetColor(Theme::D2DColor(theme_.colors.focusRing, 0.5f));
             rt_->DrawLine(D2D1::Point2F(frame.columns[(size_t)i].left, y),
-                          D2D1::Point2F(frame.columns[(size_t)i].right, y), brush_, S(1.4f));
+                          D2D1::Point2F(frame.columns[(size_t)i].right, y), brush_, S(1.2f));
             break;
         }
     }
@@ -1598,7 +1599,11 @@ void MainWindow::OnRButtonUp(float x, float y) {
     if (editing()) CommitEdit(false);
     Hit h = HitTest(x, y);
     if (h.kind == HitKind::Calendar) { SetActiveView(calendarActive() ? MainView::Lists : MainView::Calendar); return; }
-    if (h.kind == HitKind::ListTab) ShowListTabMenu(h.itemIndex, x, y);
+    if (h.kind == HitKind::ListTab) { ShowListTabMenu(h.itemIndex, x, y); return; }
+    if (h.kind == HitKind::CalendarBlock || h.kind == HitKind::CalendarResizeStart ||
+        h.kind == HitKind::CalendarResizeEnd) {
+        ShowCalendarBlockMenu(h.itemIndex, x, y);
+    }
 }
 
 void MainWindow::OnMouseMove(float x, float y, bool lButton) {

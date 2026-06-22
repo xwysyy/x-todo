@@ -1783,6 +1783,31 @@ void MainWindow::ShowListTabMenu(int index, float x, float y) {
     MaybeCollapseCapsule();
 }
 
+void MainWindow::ShowCalendarBlockMenu(int blockId, float x, float y) {
+    if (!calendar_.FindBlock(blockId)) return;
+    std::vector<PopupMenuItem> items = ToPopupMenuItems(GuiMenu::BuildCalendarBlockMenu(lang_));
+
+    POINT pt{ (LONG)x, (LONG)y };
+    ClientToScreen(hwnd_, &pt);
+    menuOpen_ = true;
+    UINT cmd = ShowPopupMenu(hwnd_, pt, items, false, theme_, d2dFactory_, dwrite_);
+    menuOpen_ = false;
+
+    if (cmd == GuiMenu::kCmdCalendarBlockDelete) DeleteCalendarBlock(blockId);
+    MaybeCollapseCapsule();
+}
+
+void MainWindow::DeleteCalendarBlock(int blockId) {
+    if (!calendar_.FindBlock(blockId)) return;
+    if (calendarEditing()) EndCalendarEdit(true);
+    if (!calendar_.FindBlock(blockId)) return; // 结束编辑可能已回收空标题块
+    if (!Confirm(Str::CalendarBlockDeleteMsg, MB_ICONWARNING)) return;
+    if (!calendar_.RemoveBlock(blockId)) return;
+    BuildCalendarBlockRects();
+    ScheduleSave();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
 void MainWindow::SetLanguage(Lang lang) {
     if (lang == lang_) return;
     lang_ = lang;

@@ -18,6 +18,8 @@ enum class Str {
     CalendarModeDay,   // 日历视图：日
     CalendarModeWeek,  // 日历视图：周
     CalendarModeMonth, // 日历视图：月
+    CalendarBlockDelete,    // 删除时间块（右键菜单）
+    CalendarBlockDeleteMsg, // 删除时间块确认正文
     EmptyListTitle,// 空列表标题
     EmptyActivePrompt,// 空列表副说明
     NewTask,       // 新建待办按钮

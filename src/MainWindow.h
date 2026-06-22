@@ -205,6 +205,8 @@ private:
     void  RenameList(int index);
     void  DeleteList(int index);
     void  ShowListTabMenu(int index, float x, float y);
+    void  ShowCalendarBlockMenu(int blockId, float x, float y);
+    void  DeleteCalendarBlock(int blockId);
 
     // —— 主题 ——
     void ReloadThemes();                   // 重扫 %APPDATA%\x-todo\themes\ 自定义主题目录

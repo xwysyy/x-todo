@@ -20,6 +20,8 @@ const wchar_t* T(Str key, Lang lang) {
         case Str::CalendarModeDay:   return zh ? L"日"           : L"Day";
         case Str::CalendarModeWeek:  return zh ? L"周"           : L"Week";
         case Str::CalendarModeMonth: return zh ? L"月"           : L"Month";
+        case Str::CalendarBlockDelete:    return zh ? L"删除时间块"   : L"Delete block";
+        case Str::CalendarBlockDeleteMsg: return zh ? L"删除这个时间块？" : L"Delete this time block?";
         case Str::EmptyListTitle:return zh ? L"这个列表还没有待办" : L"No tasks here yet";
         case Str::EmptyActivePrompt:
                                   return zh ? L"新建一条，开始安排要做的事" : L"Add one to start planning.";

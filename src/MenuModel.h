@@ -25,6 +25,7 @@ inline constexpr Command kCmdThemeCustomBase = 1300;
 inline constexpr Command kCmdThemeManager = 1900;
 inline constexpr Command kCmdListRename = 2000;
 inline constexpr Command kCmdListDelete = 2001;
+inline constexpr Command kCmdCalendarBlockDelete = 2100;
 
 enum class MountMode {
     Normal,
@@ -63,6 +64,7 @@ std::vector<Item> BuildTrayMenu(const State& state);
 std::vector<Item> BuildTitleMenu(const State& state);
 std::vector<Item> BuildThemeMenu(const State& state);
 std::vector<Item> BuildListTabMenu(Lang lang, int listCount);
+std::vector<Item> BuildCalendarBlockMenu(Lang lang);
 
 const char* BuiltInThemeIdForCommand(Command cmd);
 

@@ -97,6 +97,12 @@ std::vector<Item> BuildListTabMenu(Lang lang, int listCount) {
     };
 }
 
+std::vector<Item> BuildCalendarBlockMenu(Lang lang) {
+    return {
+        Item{ kCmdCalendarBlockDelete, T(Str::CalendarBlockDelete, lang), false, false, true, true },
+    };
+}
+
 const char* BuiltInThemeIdForCommand(Command cmd) {
     if (cmd < kCmdThemeBuiltinBase ||
         cmd >= kCmdThemeBuiltinBase + static_cast<int>(kBuiltInThemeCount))
