@@ -12,6 +12,13 @@ namespace {
 constexpr wchar_t kManagerClass[] = L"XTodoThemeManagerWindow";
 namespace Ui = ThemedWindow;
 
+template <class T> void SafeRelease(T** p) {
+    if (*p) {
+        (*p)->Release();
+        *p = nullptr;
+    }
+}
+
 enum class RowKind { Header, ThemeItem, Text, Button };
 enum class BtnAction { None, Reload, OpenFolder, Export, SetLight, SetDark, Close };
 
@@ -35,6 +42,14 @@ struct ManagerState {
     int contentH = 0;
     int w = 0, h = 0;
     bool done = false;
+    ID2D1Factory* d2dFactory = nullptr;
+    IDWriteFactory* dwrite = nullptr;
+    ID2D1HwndRenderTarget* rt = nullptr;
+    ID2D1SolidColorBrush* brush = nullptr;
+    IDWriteTextFormat* headFmt = nullptr;
+    IDWriteTextFormat* itemFmt = nullptr;
+    IDWriteTextFormat* textFmt = nullptr;
+    IDWriteTextFormat* buttonFmt = nullptr;
 };
 
 const wchar_t* ModeLabel(const ManagerHost& h) {
@@ -136,22 +151,45 @@ int HitRow(ManagerState& s, int y) {
     return -1;
 }
 
+bool CreateTextFormats(ManagerState& s) {
+    return Ui::CreateTextFormat(s.dwrite, s.hwnd, 11.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                                DWRITE_TEXT_ALIGNMENT_LEADING,
+                                DWRITE_PARAGRAPH_ALIGNMENT_CENTER, &s.headFmt) &&
+           Ui::CreateTextFormat(s.dwrite, s.hwnd, 10.5f, DWRITE_FONT_WEIGHT_NORMAL,
+                                DWRITE_TEXT_ALIGNMENT_LEADING,
+                                DWRITE_PARAGRAPH_ALIGNMENT_CENTER, &s.itemFmt) &&
+           Ui::CreateTextFormat(s.dwrite, s.hwnd, 9.5f, DWRITE_FONT_WEIGHT_NORMAL,
+                                DWRITE_TEXT_ALIGNMENT_LEADING,
+                                DWRITE_PARAGRAPH_ALIGNMENT_CENTER, &s.textFmt) &&
+           Ui::CreateTextFormat(s.dwrite, s.hwnd, 10.5f, DWRITE_FONT_WEIGHT_NORMAL,
+                                DWRITE_TEXT_ALIGNMENT_CENTER,
+                                DWRITE_PARAGRAPH_ALIGNMENT_CENTER, &s.buttonFmt);
+}
+
+void ReleaseDrawingResources(ManagerState& s) {
+    SafeRelease(&s.buttonFmt);
+    SafeRelease(&s.textFmt);
+    SafeRelease(&s.itemFmt);
+    SafeRelease(&s.headFmt);
+    SafeRelease(&s.brush);
+    SafeRelease(&s.rt);
+}
+
 void Paint(ManagerState& s) {
     PAINTSTRUCT ps{};
-    HDC hdc = BeginPaint(s.hwnd, &ps);
+    BeginPaint(s.hwnd, &ps);
+    if ((!s.rt || !s.brush) &&
+        !Ui::CreateDeviceResources(s.hwnd, s.d2dFactory, &s.rt, &s.brush)) {
+        EndPaint(s.hwnd, &ps);
+        return;
+    }
     RECT rc{}; GetClientRect(s.hwnd, &rc);
 
-    // 双缓冲，避免滚动闪烁
-    HDC mem = CreateCompatibleDC(hdc);
-    HBITMAP bmp = CreateCompatibleBitmap(hdc, rc.right, rc.bottom);
-    HGDIOBJ oldBmp = SelectObject(mem, bmp);
-
     const ColorSet& c = s.host->current.colors;
-    Ui::FillColor(mem, rc, c.paperElevated);
+    s.rt->BeginDraw();
+    s.rt->SetTransform(D2D1::Matrix3x2F::Identity());
+    Ui::FillColor(s.rt, c.paperElevated);
 
-    HFONT headFont = Ui::CreateTextFont(s.hwnd, 11.0f, true);
-    HFONT itemFont = Ui::CreateTextFont(s.hwnd, 10.5f, false);
-    HFONT txtFont  = Ui::CreateTextFont(s.hwnd, 9.5f, false);
     int padX = Ui::Px(s.hwnd, 12);
 
     for (size_t i = 0; i < s.rows.size(); ++i) {
@@ -162,40 +200,40 @@ void Paint(ManagerState& s) {
 
         if (r.kind == RowKind::Header) {
             if (!r.text.empty())
-                Ui::DrawTextInRect(mem, r.text, rr, headFont, c.text, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                Ui::RenderText(s.rt, s.brush, r.text, rr, s.headFmt, c.text);
         } else if (r.kind == RowKind::Text) {
-            Ui::DrawTextInRect(mem, r.text, rr, txtFont, c.textWeak, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            Ui::RenderText(s.rt, s.brush, r.text, rr, s.textFmt, c.textWeak);
         } else if (r.kind == RowKind::ThemeItem) {
             RECT row{ Ui::Px(s.hwnd, 8), top + 1, rc.right - Ui::Px(s.hwnd, 8), top + r.height - 1 };
-            if ((int)i == s.hover) Ui::FillRoundColor(mem, row, Ui::Px(s.hwnd, 6), c.menuHover);
-            // radio：当前主题打勾点
+            if ((int)i == s.hover)
+                Ui::FillRoundedRect(s.rt, s.brush, row, static_cast<float>(Ui::Px(s.hwnd, 6)), c.menuHover);
             int dotR = Ui::Px(s.hwnd, 4);
             int cx = padX + dotR, cy = top + r.height / 2;
-            HBRUSH dotBr = CreateSolidBrush(GdiColor(r.current ? c.checkFill : c.paperElevated));
-            HPEN dotPen = CreatePen(PS_SOLID, 1, GdiColor(r.current ? c.checkFill : c.checkBorder));
-            HGDIOBJ ob = SelectObject(mem, dotBr); HGDIOBJ op = SelectObject(mem, dotPen);
-            Ellipse(mem, cx - dotR, cy - dotR, cx + dotR, cy + dotR);
-            SelectObject(mem, op); SelectObject(mem, ob);
-            DeleteObject(dotBr); DeleteObject(dotPen);
+            RECT dot{ cx - dotR, cy - dotR, cx + dotR, cy + dotR };
+            Ui::FillRoundedRect(s.rt, s.brush, dot, static_cast<float>(dotR),
+                              r.current ? c.checkFill : c.paperElevated);
+            Ui::StrokeRoundedRect(s.rt, s.brush, dot, static_cast<float>(dotR),
+                                r.current ? c.checkFill : c.checkBorder);
             RECT tr{ padX + dotR * 2 + Ui::Px(s.hwnd, 8), top, rc.right - padX, top + r.height };
-            Ui::DrawTextInRect(mem, r.text, tr, itemFont, c.text, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            Ui::RenderText(s.rt, s.brush, r.text, tr, s.itemFmt, c.text);
         } else if (r.kind == RowKind::Button) {
             RECT btn{ padX, top + 2, rc.right - padX, top + r.height - 2 };
             uint32_t fill = ((int)i == s.hover) ? c.buttonHover : c.paperElevated;
-            Ui::FillRoundColor(mem, btn, Ui::Px(s.hwnd, 7), fill);
-            Ui::StrokeRoundColor(mem, btn, Ui::Px(s.hwnd, 7), c.paperEdge);
-            Ui::DrawTextInRect(mem, r.text, btn, itemFont, c.text, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            const float radius = static_cast<float>(Ui::Px(s.hwnd, 7));
+            Ui::FillRoundedRect(s.rt, s.brush, btn, radius, fill);
+            Ui::StrokeRoundedRect(s.rt, s.brush, btn, radius, c.paperEdge);
+            Ui::RenderText(s.rt, s.brush, r.text, btn, s.buttonFmt, c.text);
         }
     }
 
-    // 外边框
-    Ui::StrokeRoundColor(mem, RECT{ 0, 0, rc.right, rc.bottom }, Ui::Px(s.hwnd, 10), c.paperEdge);
+    Ui::StrokeRoundedRect(s.rt, s.brush, RECT{ 0, 0, rc.right, rc.bottom },
+                        static_cast<float>(Ui::Px(s.hwnd, 10)), c.paperEdge);
 
-    BitBlt(hdc, 0, 0, rc.right, rc.bottom, mem, 0, 0, SRCCOPY);
-    DeleteObject(headFont); DeleteObject(itemFont); DeleteObject(txtFont);
-    SelectObject(mem, oldBmp);
-    DeleteObject(bmp);
-    DeleteDC(mem);
+    HRESULT hr = s.rt->EndDraw();
+    if (hr == D2DERR_RECREATE_TARGET) {
+        SafeRelease(&s.brush);
+        SafeRelease(&s.rt);
+    }
     EndPaint(s.hwnd, &ps);
 }
 
@@ -238,6 +276,14 @@ LRESULT CALLBACK ManagerProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_PAINT: Paint(*s); return 0;
     case WM_ERASEBKGND: return 1;
+    case WM_SIZE:
+        if (s->rt) {
+            UINT width = LOWORD(lp);
+            UINT height = HIWORD(lp);
+            if (width > 0 && height > 0)
+                s->rt->Resize(D2D1::SizeU(width, height));
+        }
+        return 0;
     case WM_MOUSEMOVE: {
         TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd, 0 };
         TrackMouseEvent(&tme);
@@ -267,6 +313,7 @@ LRESULT CALLBACK ManagerProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         s->done = true; DestroyWindow(hwnd);
         return 0;
     case WM_DESTROY:
+        ReleaseDrawingResources(*s);
         return 0;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
@@ -285,12 +332,15 @@ bool RegisterManagerClass() {
 
 } // namespace
 
-void ShowThemeManagerWindow(HWND owner, ManagerHost& host) {
-    if (!RegisterManagerClass()) return;
+void ShowThemeManagerWindow(HWND owner, ManagerHost& host,
+                            ID2D1Factory* d2dFactory, IDWriteFactory* dwrite) {
+    if (!RegisterManagerClass() || !d2dFactory || !dwrite) return;
 
     ManagerState state{};
     state.owner = owner;
     state.host = &host;
+    state.d2dFactory = d2dFactory;
+    state.dwrite = dwrite;
 
     UINT dpi = owner ? GetDpiForWindow(owner) : 96;
     state.w = MulDiv(300, dpi, 96);
@@ -310,6 +360,13 @@ void ShowThemeManagerWindow(HWND owner, ManagerHost& host) {
                                 x, y, state.w, state.h,
                                 owner, nullptr, GetModuleHandleW(nullptr), &state);
     if (!hwnd) return;
+    Ui::ApplyPopupRoundShape(hwnd, state.w, state.h, Ui::Px(hwnd, 14));
+    if (!Ui::CreateDeviceResources(hwnd, d2dFactory, &state.rt, &state.brush) ||
+        !CreateTextFormats(state)) {
+        ReleaseDrawingResources(state);
+        DestroyWindow(hwnd);
+        return;
+    }
 
     BuildRows(state);
     LayoutRows(state);

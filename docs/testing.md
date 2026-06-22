@@ -16,6 +16,7 @@ Win32 dependencies so they run in CI on both Linux and Windows.
 | `xtodo_theme_tests` | color helpers, built-in theme catalog stability, contrast thresholds, theme resolution and fallback behavior |
 | `xtodo_i18n_tests` | all declared UI strings in zh/en, important behavioral strings, default language result validity |
 | `xtodo_gui_contract_tests` | headless GUI contracts for non-client hit-testing, geometry capture policy, title/tab/row layout hit-testing, popup menu item models, and inline edit key intents |
+| `xtodo_rendering_policy_tests` | source-level rendering policy checks that block GDI drawing backends in settings-like popup surfaces |
 
 ## Run with CMake
 
@@ -60,6 +61,11 @@ The native window code must call those modules instead of duplicating the same
 math in `MainWindow.cpp` or `MainWindowView.cpp`; otherwise the headless tests
 are only checking a parallel implementation.
 
+Rendering-backend regressions that cannot be verified by Linux screenshots should
+be covered by `xtodo_rendering_policy_tests`. The settings window, theme manager,
+and `ThemedWindowControls` must not reintroduce GDI double-buffering,
+`RoundRect`, GDI brush/pen drawing, or GDI text measurement for framed popup UI.
+
 ## CI coverage
 
 The `build` workflow runs the full CMake test suite on `ubuntu-latest` and
@@ -76,4 +82,14 @@ g++ -std=c++17 -Wall -Wextra -Wpedantic -I src -I tests \
   src/ViewLayout.cpp src/WindowHitTest.cpp src/I18n.cpp \
   -o /tmp/xtodo_gui_contract_tests
 /tmp/xtodo_gui_contract_tests
+```
+
+The rendering policy target can also run without CMake:
+
+```bash
+g++ -std=c++17 -Wall -Wextra -Wpedantic -I tests \
+  -DXTODO_SOURCE_DIR='"/path/to/X-TODO"' \
+  tests/rendering_policy_tests.cpp \
+  -o /tmp/xtodo_rendering_policy_tests
+/tmp/xtodo_rendering_policy_tests
 ```

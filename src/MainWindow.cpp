@@ -1285,7 +1285,7 @@ void MainWindow::ShowThemeManager() {
     };
     host.setLightFollow = [this, &refresh](const std::string& id) { SetFollowSystemThemes(id, ""); refresh(); };
     host.setDarkFollow  = [this, &refresh](const std::string& id) { SetFollowSystemThemes("", id); refresh(); };
-    Theme::ShowThemeManagerWindow(hwnd_, host);
+    Theme::ShowThemeManagerWindow(hwnd_, host, d2dFactory_, dwrite_);
 }
 
 void MainWindow::Show(bool expandCapsule) {
@@ -1802,7 +1802,7 @@ void MainWindow::ShowSettings() {
         refresh();
     };
 
-    Settings::ShowSettingsWindow(hwnd_, host);
+    Settings::ShowSettingsWindow(hwnd_, host, d2dFactory_, dwrite_);
     MaybeCollapseCapsule();
 }
 

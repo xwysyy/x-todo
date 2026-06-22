@@ -3,6 +3,8 @@
 #include "I18n.h"
 #include "Theme.h"
 
+#include <d2d1.h>
+#include <dwrite.h>
 #include <windows.h>
 #include <functional>
 #include <string>
@@ -23,6 +25,7 @@ struct Host {
     std::function<void()> disableBackup;
 };
 
-void ShowSettingsWindow(HWND owner, Host& host);
+void ShowSettingsWindow(HWND owner, Host& host,
+                        ID2D1Factory* d2dFactory, IDWriteFactory* dwrite);
 
 } // namespace Settings

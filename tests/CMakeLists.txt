@@ -66,6 +66,13 @@ add_xtodo_test(xtodo_gui_contract_tests
     ../src/I18n.cpp
 )
 
+add_xtodo_test(xtodo_rendering_policy_tests
+    rendering_policy_tests.cpp
+)
+target_compile_definitions(xtodo_rendering_policy_tests
+    PRIVATE XTODO_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
 add_xtodo_test(xtodo_calendar_date_tests
     calendar_date_tests.cpp
     ../src/CalendarDate.cpp

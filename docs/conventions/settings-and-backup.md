@@ -7,9 +7,9 @@ window owns language, autostart, and automatic data backup.
 ## Settings Window
 
 The settings window follows the same self-drawn modal style as theme management.
-Shared drawing basics live in `ThemedWindowControls`; do not duplicate local
-copies of the font, fill, rounded-rect, stroke, and text helpers in each
-settings-like window.
+Shared Direct2D and DirectWrite drawing basics live in `ThemedWindowControls`;
+do not duplicate local copies of font-format creation, fill, rounded-rect,
+stroke, text, divider, or path-elision helpers in each settings-like window.
 
 Keep the settings surface compact. Rows are for direct state changes and short
 status values. Do not add explanatory paragraphs, nested cards, or duplicate

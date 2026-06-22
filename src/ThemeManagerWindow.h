@@ -1,6 +1,8 @@
 #pragma once
 #include "Theme.h"
 #include "I18n.h"
+#include <d2d1.h>
+#include <dwrite.h>
 #include <windows.h>
 #include <functional>
 #include <string>
@@ -33,6 +35,7 @@ struct ManagerHost {
 };
 
 // 模态打开主题管理窗口；host 引用需在调用期间保持有效。
-void ShowThemeManagerWindow(HWND owner, ManagerHost& host);
+void ShowThemeManagerWindow(HWND owner, ManagerHost& host,
+                            ID2D1Factory* d2dFactory, IDWriteFactory* dwrite);
 
 } // namespace Theme

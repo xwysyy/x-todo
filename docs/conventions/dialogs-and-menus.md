@@ -4,7 +4,7 @@ Hard constraints in X-TODO's custom-drawn popups, discovered through
 specific bugs. Each rule below regressed at least once.
 
 The two popups are both owner-drawn Win32 `WS_POPUP` windows with their
-own window class, message loop, and GDI paint code, living in the
+own window class, message loop, and Direct2D/DirectWrite paint code, living in the
 anonymous namespace at the top of `src/MainWindow.cpp`. There is no
 common dialog or `TrackPopupMenu`; everything (sizing, hit-testing,
 painting, cursor) is hand-rolled, so the usual framework guarantees do

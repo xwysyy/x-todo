@@ -13,6 +13,13 @@ namespace {
 constexpr wchar_t kSettingsClass[] = L"XTodoSettingsWindow";
 namespace Ui = ThemedWindow;
 
+template <class T> void SafeRelease(T** p) {
+    if (*p) {
+        (*p)->Release();
+        *p = nullptr;
+    }
+}
+
 enum class RowKind { Section, Language, ToggleAutostart, ToggleBackup, Folder, Status };
 enum class Action { None, LangZh, LangEn, Autostart, BackupToggle, BackupFolder, Close };
 
@@ -42,6 +49,16 @@ struct State {
     int h = 0;
     int headerH = 0;
     bool done = false;
+    ID2D1Factory* d2dFactory = nullptr;
+    IDWriteFactory* dwrite = nullptr;
+    ID2D1HwndRenderTarget* rt = nullptr;
+    ID2D1SolidColorBrush* brush = nullptr;
+    IDWriteTextFormat* titleFmt = nullptr;
+    IDWriteTextFormat* sectionFmt = nullptr;
+    IDWriteTextFormat* rowFmt = nullptr;
+    IDWriteTextFormat* smallLeftFmt = nullptr;
+    IDWriteTextFormat* smallRightFmt = nullptr;
+    IDWriteTextFormat* smallCenterFmt = nullptr;
 };
 
 std::wstring FormatBackupTime(long long epoch, Lang lang) {
@@ -206,84 +223,111 @@ Action ActionAt(State& s, int x, int y) {
     return Action::None;
 }
 
-void DrawDivider(HDC dc, RECT rect, const Theme::ColorSet& c) {
+bool CreateTextFormats(State& s) {
+    return Ui::CreateTextFormat(s.dwrite, s.hwnd, 12.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                                DWRITE_TEXT_ALIGNMENT_LEADING,
+                                DWRITE_PARAGRAPH_ALIGNMENT_CENTER, &s.titleFmt) &&
+           Ui::CreateTextFormat(s.dwrite, s.hwnd, 10.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                                DWRITE_TEXT_ALIGNMENT_LEADING,
+                                DWRITE_PARAGRAPH_ALIGNMENT_CENTER, &s.sectionFmt) &&
+           Ui::CreateTextFormat(s.dwrite, s.hwnd, 10.5f, DWRITE_FONT_WEIGHT_NORMAL,
+                                DWRITE_TEXT_ALIGNMENT_LEADING,
+                                DWRITE_PARAGRAPH_ALIGNMENT_CENTER, &s.rowFmt) &&
+           Ui::CreateTextFormat(s.dwrite, s.hwnd, 9.2f, DWRITE_FONT_WEIGHT_NORMAL,
+                                DWRITE_TEXT_ALIGNMENT_LEADING,
+                                DWRITE_PARAGRAPH_ALIGNMENT_CENTER, &s.smallLeftFmt) &&
+           Ui::CreateTextFormat(s.dwrite, s.hwnd, 9.2f, DWRITE_FONT_WEIGHT_NORMAL,
+                                DWRITE_TEXT_ALIGNMENT_TRAILING,
+                                DWRITE_PARAGRAPH_ALIGNMENT_CENTER, &s.smallRightFmt) &&
+           Ui::CreateTextFormat(s.dwrite, s.hwnd, 9.2f, DWRITE_FONT_WEIGHT_NORMAL,
+                                DWRITE_TEXT_ALIGNMENT_CENTER,
+                                DWRITE_PARAGRAPH_ALIGNMENT_CENTER, &s.smallCenterFmt);
+}
+
+void ReleaseDrawingResources(State& s) {
+    SafeRelease(&s.smallCenterFmt);
+    SafeRelease(&s.smallRightFmt);
+    SafeRelease(&s.smallLeftFmt);
+    SafeRelease(&s.rowFmt);
+    SafeRelease(&s.sectionFmt);
+    SafeRelease(&s.titleFmt);
+    SafeRelease(&s.brush);
+    SafeRelease(&s.rt);
+}
+
+void DrawDivider(State& s, RECT rect, const Theme::ColorSet& c) {
     RECT line{ rect.left, rect.bottom - 1, rect.right, rect.bottom };
-    Ui::FillColor(dc, line, c.divider);
+    Ui::FillRect(s.rt, s.brush, line, c.divider);
 }
 
-void DrawLine(HDC dc, int x1, int y1, int x2, int y2, uint32_t color, int width = 1) {
-    HPEN pen = CreatePen(PS_SOLID, width, Theme::GdiColor(color));
-    HGDIOBJ oldPen = SelectObject(dc, pen);
-    MoveToEx(dc, x1, y1, nullptr);
-    LineTo(dc, x2, y2);
-    SelectObject(dc, oldPen);
-    DeleteObject(pen);
-}
-
-void DrawCloseButton(HDC dc, HWND hwnd, const State& s, const Theme::ColorSet& c) {
+void DrawCloseButton(State& s, HWND hwnd, const Theme::ColorSet& c) {
     RECT btn = HeaderCloseRect(s);
     if (s.hover == Action::Close)
-        Ui::FillRoundColor(dc, btn, Ui::Px(hwnd, 8), c.buttonHover);
+        Ui::FillRoundedRect(s.rt, s.brush, btn, static_cast<float>(Ui::Px(hwnd, 8)), c.buttonHover);
     const int cx = (btn.left + btn.right) / 2;
     const int cy = (btn.top + btn.bottom) / 2;
     const int half = Ui::Px(hwnd, 5);
-    DrawLine(dc, cx - half, cy - half, cx + half, cy + half, c.textWeak, Ui::Px(hwnd, 1.5f));
-    DrawLine(dc, cx + half, cy - half, cx - half, cy + half, c.textWeak, Ui::Px(hwnd, 1.5f));
+    Ui::DrawLine(s.rt, s.brush, static_cast<float>(cx - half), static_cast<float>(cy - half),
+                 static_cast<float>(cx + half), static_cast<float>(cy + half),
+                 c.textWeak, static_cast<float>(Ui::Px(hwnd, 1.5f)));
+    Ui::DrawLine(s.rt, s.brush, static_cast<float>(cx + half), static_cast<float>(cy - half),
+                 static_cast<float>(cx - half), static_cast<float>(cy + half),
+                 c.textWeak, static_cast<float>(Ui::Px(hwnd, 1.5f)));
 }
 
-void DrawPill(HDC dc, HWND hwnd, RECT rect, const std::wstring& text, bool selected,
-              bool hovered, HFONT font, const Theme::ColorSet& c) {
+void DrawPill(State& s, HWND hwnd, RECT rect, const std::wstring& text, bool selected,
+              bool hovered, const Theme::ColorSet& c) {
     const uint32_t fill = selected ? c.checkFill : (hovered ? c.buttonHover : c.paper);
     const uint32_t textColor = selected ? c.checkMark : c.text;
-    Ui::FillRoundColor(dc, rect, Ui::Px(hwnd, 7), fill);
-    Ui::StrokeRoundColor(dc, rect, Ui::Px(hwnd, 7), selected ? c.checkFill : c.paperEdge);
-    Ui::DrawTextInRect(dc, text, rect, font, textColor,
-                       DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    const float radius = static_cast<float>(Ui::Px(hwnd, 7));
+    Ui::FillRoundedRect(s.rt, s.brush, rect, radius, fill);
+    Ui::StrokeRoundedRect(s.rt, s.brush, rect, radius, selected ? c.checkFill : c.paperEdge);
+    Ui::RenderText(s.rt, s.brush, text, rect, s.smallCenterFmt, textColor);
 }
 
-void DrawToggle(HDC dc, HWND hwnd, RECT rect, bool on, bool hovered,
+void DrawToggle(State& s, HWND hwnd, RECT rect, bool on, bool hovered,
                 const Theme::ColorSet& c) {
     const uint32_t fill = on ? c.checkFill
                              : (hovered ? c.buttonHover : Theme::Blend(c.paperEdge, c.paperElevated, 0.25f));
-    Ui::FillRoundColor(dc, rect, Ui::Px(hwnd, 11), fill);
-    Ui::StrokeRoundColor(dc, rect, Ui::Px(hwnd, 11), on ? c.checkFill : c.paperEdge);
+    const float radius = static_cast<float>(Ui::Px(hwnd, 11));
+    Ui::FillRoundedRect(s.rt, s.brush, rect, radius, fill);
+    Ui::StrokeRoundedRect(s.rt, s.brush, rect, radius, on ? c.checkFill : c.paperEdge);
 
     const int knob = Ui::Px(hwnd, 16);
     const int pad = Ui::Px(hwnd, 3);
     const int knobLeft = on ? rect.right - pad - knob : rect.left + pad;
     RECT k{ knobLeft, rect.top + pad, knobLeft + knob, rect.top + pad + knob };
-    Ui::FillRoundColor(dc, k, knob / 2, on ? c.checkMark : c.paperElevated);
+    Ui::FillRoundedRect(s.rt, s.brush, k, static_cast<float>(knob) / 2.0f,
+                      on ? c.checkMark : c.paperElevated);
 }
 
 void Paint(State& s) {
     PAINTSTRUCT ps{};
-    HDC hdc = BeginPaint(s.hwnd, &ps);
+    BeginPaint(s.hwnd, &ps);
+    if ((!s.rt || !s.brush) &&
+        !Ui::CreateDeviceResources(s.hwnd, s.d2dFactory, &s.rt, &s.brush)) {
+        EndPaint(s.hwnd, &ps);
+        return;
+    }
     RECT rc{};
     GetClientRect(s.hwnd, &rc);
 
-    HDC mem = CreateCompatibleDC(hdc);
-    HBITMAP bmp = CreateCompatibleBitmap(hdc, rc.right, rc.bottom);
-    HGDIOBJ oldBmp = SelectObject(mem, bmp);
-
     const Theme::ColorSet& c = s.host->theme.colors;
-    Ui::FillColor(mem, rc, c.paper);
-
-    HFONT titleFont = Ui::CreateTextFont(s.hwnd, 12.0f, true);
-    HFONT sectionFont = Ui::CreateTextFont(s.hwnd, 10.5f, true);
-    HFONT rowFont = Ui::CreateTextFont(s.hwnd, 10.5f, false);
-    HFONT smallFont = Ui::CreateTextFont(s.hwnd, 9.2f, false);
+    s.rt->BeginDraw();
+    s.rt->SetTransform(D2D1::Matrix3x2F::Identity());
+    Ui::FillColor(s.rt, c.paper);
 
     RECT titleRect{ Ui::Px(s.hwnd, 14), 0, s.w - Ui::Px(s.hwnd, 44), s.headerH };
-    Ui::DrawTextInRect(mem, T(Str::Settings, s.host->lang), titleRect, titleFont, c.text,
-                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    DrawCloseButton(mem, s.hwnd, s, c);
+    Ui::RenderText(s.rt, s.brush, T(Str::Settings, s.host->lang), titleRect, s.titleFmt, c.text);
+    DrawCloseButton(s, s.hwnd, c);
 
     for (size_t i = 0; i < s.rows.size(); ++i) {
         if (s.rows[i].kind != RowKind::Section) continue;
         RECT card = CardRect(s, i);
         if (card.bottom <= card.top || card.bottom < 0 || card.top > rc.bottom) continue;
-        Ui::FillRoundColor(mem, card, Ui::Px(s.hwnd, 10), c.paperElevated);
-        Ui::StrokeRoundColor(mem, card, Ui::Px(s.hwnd, 10), c.paperEdge);
+        const float radius = static_cast<float>(Ui::Px(s.hwnd, 10));
+        Ui::FillRoundedRect(s.rt, s.brush, card, radius, c.paperElevated);
+        Ui::StrokeRoundedRect(s.rt, s.brush, card, radius, c.paperEdge);
     }
 
     for (size_t i = 0; i < s.rows.size(); ++i) {
@@ -294,26 +338,28 @@ void Paint(State& s) {
         switch (row.kind) {
             case RowKind::Section: {
                 RECT sectionRect{ Ui::Px(s.hwnd, 14), rr.top, rr.right, rr.bottom };
-                Ui::DrawTextInRect(mem, row.label, sectionRect, sectionFont, c.textWeak,
-                                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                Ui::RenderText(s.rt, s.brush, row.label, sectionRect, s.sectionFmt, c.textWeak);
                 break;
             }
             case RowKind::Language: {
-                Ui::DrawTextInRect(mem, row.label, rr, rowFont, c.text,
-                                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                Ui::RenderText(s.rt, s.brush, row.label, rr, s.rowFmt, c.text);
                 RECT zh{}, en{};
                 LanguageRects(s, row, zh, en);
                 RECT segment{ zh.left, zh.top, en.right, en.bottom };
-                Ui::FillRoundColor(mem, segment, Ui::Px(s.hwnd, 8), c.paper);
-                Ui::StrokeRoundColor(mem, segment, Ui::Px(s.hwnd, 8), c.paperEdge);
-                DrawPill(mem, s.hwnd, zh, L"中文", s.host->lang == Lang::Zh,
-                         s.hover == Action::LangZh, smallFont, c);
-                DrawPill(mem, s.hwnd, en, L"English", s.host->lang == Lang::En,
-                         s.hover == Action::LangEn, smallFont, c);
-                DrawLine(mem, zh.right, zh.top + Ui::Px(s.hwnd, 4),
-                         zh.right, zh.bottom - Ui::Px(s.hwnd, 4), c.paperEdge);
+                const float radius = static_cast<float>(Ui::Px(s.hwnd, 8));
+                Ui::FillRoundedRect(s.rt, s.brush, segment, radius, c.paper);
+                Ui::StrokeRoundedRect(s.rt, s.brush, segment, radius, c.paperEdge);
+                DrawPill(s, s.hwnd, zh, L"中文", s.host->lang == Lang::Zh,
+                         s.hover == Action::LangZh, c);
+                DrawPill(s, s.hwnd, en, L"English", s.host->lang == Lang::En,
+                         s.hover == Action::LangEn, c);
+                Ui::DrawLine(s.rt, s.brush, static_cast<float>(zh.right),
+                             static_cast<float>(zh.top + Ui::Px(s.hwnd, 4)),
+                             static_cast<float>(zh.right),
+                             static_cast<float>(zh.bottom - Ui::Px(s.hwnd, 4)),
+                             c.paperEdge);
                 if (!LastInCard(s, i))
-                    DrawDivider(mem, RECT{ rr.left, rr.top, rr.right, rr.bottom }, c);
+                    DrawDivider(s, RECT{ rr.left, rr.top, rr.right, rr.bottom }, c);
                 break;
             }
             case RowKind::ToggleAutostart:
@@ -327,49 +373,43 @@ void Paint(State& s) {
                 if (s.hover == act) {
                     RECT hover{ rr.left - Ui::Px(s.hwnd, 8), rr.top + Ui::Px(s.hwnd, 4),
                                 rr.right + Ui::Px(s.hwnd, 8), rr.bottom - Ui::Px(s.hwnd, 4) };
-                    Ui::FillRoundColor(mem, hover, Ui::Px(s.hwnd, 8), c.menuHover);
+                    Ui::FillRoundedRect(s.rt, s.brush, hover,
+                                      static_cast<float>(Ui::Px(s.hwnd, 8)), c.menuHover);
                 }
-                Ui::DrawTextInRect(mem, row.label, rr, rowFont, c.text,
-                                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                Ui::RenderText(s.rt, s.brush, row.label, rr, s.rowFmt, c.text);
                 RECT toggle = ToggleRect(s, row);
                 RECT value{ toggle.left - Ui::Px(s.hwnd, 42), rr.top, toggle.left - Ui::Px(s.hwnd, 8), rr.bottom };
-                Ui::DrawTextInRect(mem, on ? T(Str::SettingOn, s.host->lang)
-                                           : T(Str::SettingOff, s.host->lang),
-                                   value, smallFont, c.textWeak,
-                                   DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-                DrawToggle(mem, s.hwnd, toggle, on, s.hover == act, c);
+                Ui::RenderText(s.rt, s.brush, on ? T(Str::SettingOn, s.host->lang)
+                                                  : T(Str::SettingOff, s.host->lang),
+                               value, s.smallRightFmt, c.textWeak);
+                DrawToggle(s, s.hwnd, toggle, on, s.hover == act, c);
                 if (!LastInCard(s, i))
-                    DrawDivider(mem, RECT{ rr.left, rr.top, rr.right, rr.bottom }, c);
+                    DrawDivider(s, RECT{ rr.left, rr.top, rr.right, rr.bottom }, c);
                 break;
             }
             case RowKind::Folder: {
-                Ui::DrawTextInRect(mem, row.label, rr, rowFont, c.text,
-                                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                Ui::RenderText(s.rt, s.brush, row.label, rr, s.rowFmt, c.text);
                 RECT btn = FolderButtonRect(s, row);
                 RECT pathRect{ rr.left + Ui::Px(s.hwnd, 84), rr.top,
                                btn.left - Ui::Px(s.hwnd, 8), rr.bottom };
-                std::wstring shown = Ui::ElideMiddle(mem, smallFont, row.value,
-                                                     pathRect.right - pathRect.left);
-                Ui::DrawTextInRect(mem, shown, pathRect, smallFont, c.textWeak,
-                                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-                DrawPill(mem, s.hwnd, btn, T(Str::BackupChangeFolder, s.host->lang),
-                         false, s.hover == Action::BackupFolder, smallFont, c);
+                std::wstring shown = Ui::ElideMiddle(s.dwrite, s.smallLeftFmt, row.value,
+                                                     static_cast<float>(pathRect.right - pathRect.left));
+                Ui::RenderText(s.rt, s.brush, shown, pathRect, s.smallLeftFmt, c.textWeak);
+                DrawPill(s, s.hwnd, btn, T(Str::BackupChangeFolder, s.host->lang),
+                         false, s.hover == Action::BackupFolder, c);
                 if (!LastInCard(s, i))
-                    DrawDivider(mem, RECT{ rr.left, rr.top, rr.right, rr.bottom }, c);
+                    DrawDivider(s, RECT{ rr.left, rr.top, rr.right, rr.bottom }, c);
                 break;
             }
             case RowKind::Status: {
                 if (!row.label.empty()) {
                     RECT labelRect = rr;
                     labelRect.right = rr.left + Ui::Px(s.hwnd, 104);
-                    Ui::DrawTextInRect(mem, row.label, labelRect, smallFont, c.textWeak,
-                                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                    Ui::RenderText(s.rt, s.brush, row.label, labelRect, s.smallLeftFmt, c.textWeak);
                     RECT valueRect{ labelRect.right, rr.top, rr.right, rr.bottom };
-                    Ui::DrawTextInRect(mem, row.value, valueRect, smallFont, c.textWeak,
-                                       DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                    Ui::RenderText(s.rt, s.brush, row.value, valueRect, s.smallRightFmt, c.textWeak);
                 } else {
-                    Ui::DrawTextInRect(mem, row.value, rr, smallFont, c.textWeak,
-                                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                    Ui::RenderText(s.rt, s.brush, row.value, rr, s.smallLeftFmt, c.textWeak);
                 }
                 break;
             }
@@ -378,16 +418,14 @@ void Paint(State& s) {
         }
     }
 
-    Ui::StrokeRoundColor(mem, RECT{ 0, 0, rc.right, rc.bottom }, Ui::Px(s.hwnd, 12), c.paperEdge);
+    Ui::StrokeRoundedRect(s.rt, s.brush, RECT{ 0, 0, rc.right, rc.bottom },
+                        static_cast<float>(Ui::Px(s.hwnd, 12)), c.paperEdge);
 
-    BitBlt(hdc, 0, 0, rc.right, rc.bottom, mem, 0, 0, SRCCOPY);
-    DeleteObject(titleFont);
-    DeleteObject(sectionFont);
-    DeleteObject(rowFont);
-    DeleteObject(smallFont);
-    SelectObject(mem, oldBmp);
-    DeleteObject(bmp);
-    DeleteDC(mem);
+    HRESULT hr = s.rt->EndDraw();
+    if (hr == D2DERR_RECREATE_TARGET) {
+        SafeRelease(&s.brush);
+        SafeRelease(&s.rt);
+    }
     EndPaint(s.hwnd, &ps);
 }
 
@@ -445,6 +483,14 @@ LRESULT CALLBACK SettingsProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_PAINT:
             Paint(*s);
             return 0;
+        case WM_SIZE:
+            if (s->rt) {
+                UINT width = LOWORD(lp);
+                UINT height = HIWORD(lp);
+                if (width > 0 && height > 0)
+                    s->rt->Resize(D2D1::SizeU(width, height));
+            }
+            return 0;
         case WM_ERASEBKGND:
             return 1;
         case WM_MOUSEMOVE: {
@@ -492,6 +538,7 @@ LRESULT CALLBACK SettingsProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_DESTROY:
             s->done = true;
+            ReleaseDrawingResources(*s);
             return 0;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
@@ -510,12 +557,15 @@ bool RegisterSettingsClass() {
 
 } // namespace
 
-void ShowSettingsWindow(HWND owner, Host& host) {
-    if (!RegisterSettingsClass()) return;
+void ShowSettingsWindow(HWND owner, Host& host,
+                        ID2D1Factory* d2dFactory, IDWriteFactory* dwrite) {
+    if (!RegisterSettingsClass() || !d2dFactory || !dwrite) return;
 
     State state{};
     state.owner = owner;
     state.host = &host;
+    state.d2dFactory = d2dFactory;
+    state.dwrite = dwrite;
 
     UINT dpi = owner ? GetDpiForWindow(owner) : 96;
     state.w = MulDiv(390, dpi, 96);
@@ -545,6 +595,12 @@ void ShowSettingsWindow(HWND owner, Host& host) {
                                 owner, nullptr, GetModuleHandleW(nullptr), &state);
     if (!hwnd) return;
     Ui::ApplyPopupRoundShape(hwnd, state.w, state.h, Ui::Px(hwnd, 16));
+    if (!Ui::CreateDeviceResources(hwnd, d2dFactory, &state.rt, &state.brush) ||
+        !CreateTextFormats(state)) {
+        ReleaseDrawingResources(state);
+        DestroyWindow(hwnd);
+        return;
+    }
 
     BuildRows(state);
     LayoutRows(state);
