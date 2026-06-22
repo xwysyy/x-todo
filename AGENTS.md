@@ -46,6 +46,7 @@ ctest --test-dir build-tests --output-on-failure -C Release
 - Surface frames and child HWND frames: `docs/conventions/surface-rendering.md`
 - Hit-testing and geometry: `docs/conventions/window-hittest-and-geometry.md`
 - Multilevel list storage and behavior: `docs/conventions/multilevel-lists.md`
+- Calendar system: `docs/conventions/calendar.md`
 - Testing layout and regression policy: `docs/testing.md`
 
 ## Commit And Push
