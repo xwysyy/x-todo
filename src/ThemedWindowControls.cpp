@@ -1,7 +1,15 @@
 #include "ThemedWindowControls.h"
 
+#include <dwmapi.h>
 #include <cwchar>
 #include <utility>
+
+#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+#define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#endif
+#ifndef DWMWA_BORDER_COLOR
+#define DWMWA_BORDER_COLOR 34
+#endif
 
 namespace ThemedWindow {
 
@@ -95,6 +103,20 @@ std::wstring ElideMiddle(HDC dc, HFONT font, const std::wstring& text, int maxWi
 
     SelectObject(dc, oldFont);
     return best;
+}
+
+void ApplyPopupRoundShape(HWND hwnd, int width, int height, int regionRadius) {
+    int corner = 3; // DWMWCP_ROUNDSMALL
+    HRESULT hr = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
+                                       &corner, sizeof(corner));
+    if (SUCCEEDED(hr)) {
+        COLORREF border = 0xFFFFFFFE; // DWMWA_COLOR_NONE
+        DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border, sizeof(border));
+        return;
+    }
+
+    HRGN rgn = CreateRoundRectRgn(0, 0, width + 1, height + 1, regionRadius, regionRadius);
+    if (rgn && !SetWindowRgn(hwnd, rgn, TRUE)) DeleteObject(rgn);
 }
 
 } // namespace ThemedWindow

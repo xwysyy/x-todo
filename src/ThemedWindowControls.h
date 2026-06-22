@@ -17,5 +17,6 @@ void DrawTextInRect(HDC dc, const std::wstring& text, RECT rect, HFONT font,
                     uint32_t color, UINT flags);
 
 std::wstring ElideMiddle(HDC dc, HFONT font, const std::wstring& text, int maxWidth);
+void ApplyPopupRoundShape(HWND hwnd, int width, int height, int regionRadius);
 
 } // namespace ThemedWindow
