@@ -119,13 +119,11 @@ RowControls ComputeRowControls(float windowWidth, float docY, float rowHeight, i
 
 Gui::Rect ComputeEmptyActivePrompt(float windowWidth, float docY, float viewportHeight,
                                    bool listEmpty, float dpiScale) {
+    (void)viewportHeight;
     const float pad = S(Theme::kPadX, dpiScale);
     const float top = listEmpty ? docY + S(12.0f, dpiScale) : docY;
-    const float minEmptyHeight = S(112.0f, dpiScale);
-    const float availableEmptyHeight = viewportHeight - S(36.0f, dpiScale);
-    const float height = listEmpty
-        ? (availableEmptyHeight > minEmptyHeight ? availableEmptyHeight : minEmptyHeight)
-        : S(Theme::kRowH, dpiScale);
+    // 空列表只给一张紧凑的提示卡片，不再撑满整个视口。
+    const float height = listEmpty ? S(76.0f, dpiScale) : S(Theme::kRowH, dpiScale);
     return Gui::Rect{ pad, top, windowWidth - pad, top + height };
 }
 

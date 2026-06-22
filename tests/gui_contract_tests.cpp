@@ -226,12 +226,13 @@ void TabStripNeverOverlapsAddList() {
     EXPECT_TRUE(strip.tabs.size() < metrics.size());
 }
 
-void EmptyActivePromptUsesLargeClickTargetOnlyForTrulyEmptyList() {
+void EmptyActivePromptIsCompactForEmptyList() {
+    // Empty list shows a compact card, not a viewport-filling block.
     const Gui::Rect empty = GuiLayout::ComputeEmptyActivePrompt(260.0f, 0.0f, 260.0f, true, 1.0f);
     EXPECT_EQ(empty.left, 14.0f);
     EXPECT_EQ(empty.top, 12.0f);
     EXPECT_EQ(empty.right, 246.0f);
-    EXPECT_EQ(empty.bottom, 236.0f);
+    EXPECT_EQ(empty.bottom, 88.0f);
 
     const Gui::Rect completedOnly = GuiLayout::ComputeEmptyActivePrompt(260.0f, 17.0f, 260.0f, false, 1.0f);
     EXPECT_EQ(completedOnly.left, 14.0f);
@@ -412,7 +413,7 @@ void CalendarHitTestingUsesBlockRectsAndResizeHandles() {
     EXPECT_EQ(hit.kind, GuiCalendar::HitKind::EmptyTimeline);
 }
 
-void CalendarHeaderButtonsAndStatusBarLayout() {
+void CalendarHeaderButtonsLayout() {
     const GuiCalendar::Frame frame = GuiCalendar::ComputeFrame(320.0f, 500.0f, 1.0f);
     const std::vector<GuiCalendar::BlockRect> none;
 
@@ -432,8 +433,8 @@ void CalendarHeaderButtonsAndStatusBarLayout() {
     // Today button sits between prev and next without overlap.
     EXPECT_TRUE(frame.today.left > frame.prevDay.right);
     EXPECT_TRUE(frame.today.right <= frame.nextDay.left);
-    // Status bar lives below the timeline, not overlapping it.
-    EXPECT_TRUE(frame.statusBar.top >= frame.timelineViewport.bottom);
+    // Timeline starts right below the date header (no all-day band).
+    EXPECT_TRUE(frame.timelineViewport.top < frame.timelineViewport.bottom);
 }
 
 const TestCase kTests[] = {
@@ -446,7 +447,7 @@ const TestCase kTests[] = {
     {"TitleButtonLayoutOrdersActionsAndStaysInsideWindow", TitleButtonLayoutOrdersActionsAndStaysInsideWindow},
     {"ChromeHitTestCoversTitleButtonsTabsAndAddList", ChromeHitTestCoversTitleButtonsTabsAndAddList},
     {"TabStripNeverOverlapsAddList", TabStripNeverOverlapsAddList},
-    {"EmptyActivePromptUsesLargeClickTargetOnlyForTrulyEmptyList", EmptyActivePromptUsesLargeClickTargetOnlyForTrulyEmptyList},
+    {"EmptyActivePromptIsCompactForEmptyList", EmptyActivePromptIsCompactForEmptyList},
     {"RowLayoutKeepsIndentControlsAndHitTestingInLockstep", RowLayoutKeepsIndentControlsAndHitTestingInLockstep},
     {"EditIntentMapsKeyboardWithoutLeakingControlCharacters", EditIntentMapsKeyboardWithoutLeakingControlCharacters},
     {"TitleAndTrayMenusDoNotExposeListManagementCommands", TitleAndTrayMenusDoNotExposeListManagementCommands},
@@ -454,7 +455,7 @@ const TestCase kTests[] = {
     {"ThemeMenuBuildsStableCommandRangesAndCustomCap", ThemeMenuBuildsStableCommandRangesAndCustomCap},
     {"CalendarLayoutSnapsDragCreationAndParsesMinutePrecision", CalendarLayoutSnapsDragCreationAndParsesMinutePrecision},
     {"CalendarHitTestingUsesBlockRectsAndResizeHandles", CalendarHitTestingUsesBlockRectsAndResizeHandles},
-    {"CalendarHeaderButtonsAndStatusBarLayout", CalendarHeaderButtonsAndStatusBarLayout},
+    {"CalendarHeaderButtonsLayout", CalendarHeaderButtonsLayout},
 };
 
 } // namespace

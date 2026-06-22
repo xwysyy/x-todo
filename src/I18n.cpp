@@ -17,11 +17,6 @@ const wchar_t* T(Str key, Lang lang) {
         case Str::Exit:          return zh ? L"退出"            : L"Exit";
         case Str::Calendar:      return zh ? L"日历"            : L"Calendar";
         case Str::CalendarToday: return zh ? L"今天"            : L"Today";
-        case Str::CalendarStats: return zh ? L"%d 块 · %.1f 小时 · %d 冲突"
-                                           : L"%d blocks · %.1f h · %d conflicts";
-        case Str::CalendarHint:  return zh ? L"拖动空白处新建时间块，单击色块编辑内容和时间"
-                                           : L"Drag empty time to add a block; click a block to edit";
-        case Str::AllDay:        return zh ? L"全天"            : L"All-day";
         case Str::EmptyListTitle:return zh ? L"当前列表为空"    : L"This list is empty";
         case Str::EmptyActivePrompt:
                                   return zh ? L"点击创建第一条" : L"Click to create the first item";

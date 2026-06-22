@@ -742,27 +742,16 @@ void MainWindow::DrawCalendarView(float W, float H) {
         return d;
     };
 
-    // —— 日期头：居中日名 + 统计副行，两侧导航 ——
+    // —— 日期头：居中日名，两侧导航 ——
     const auto dayBlocks = calendar_.BlocksForDay(calendarDay_);
     const std::vector<int> conflictIds = ConflictingBlockIds(dayBlocks);
-    int totalMinutes = 0;
-    for (const CalendarBlock* b : dayBlocks)
-        if (b && b->endMinute > b->startMinute) totalMinutes += b->endMinute - b->startMinute;
 
-    D2D1_RECT_F nameR = D2D1::RectF(offRect(frame.prevDay).right + S(6), top + S(7),
-                                    offRect(frame.today).left - S(6), top + S(7) + S(22));
+    D2D1_RECT_F nameR = D2D1::RectF(offRect(frame.prevDay).right + S(6), top,
+                                    offRect(frame.today).left - S(6),
+                                    top + frame.dateHeader.bottom);
     textFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
     Text(CalendarDayLabel(calendarDay_, lang_), nameR, theme_.colors.text, textFormat_);
     textFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-
-    wchar_t statsBuf[64];
-    swprintf_s(statsBuf, T(Str::CalendarStats, lang_),
-               static_cast<int>(dayBlocks.size()), totalMinutes / 60.0,
-               static_cast<int>(conflictIds.size()));
-    D2D1_RECT_F statsR = D2D1::RectF(nameR.left, nameR.bottom - S(1),
-                                     nameR.right, top + frame.dateHeader.bottom - S(4));
-    smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-    Text(statsBuf, statsR, theme_.colors.textWeak, smallFormat_);
 
     D2D1_RECT_F prevR = offRect(frame.prevDay);
     D2D1_RECT_F nextR = offRect(frame.nextDay);
@@ -770,18 +759,11 @@ void MainWindow::DrawCalendarView(float W, float H) {
     DrawSurfaceFrame(prevR, S(7), theme_.colors.paperElevated, theme_.colors.paperEdge, S(1));
     DrawSurfaceFrame(nextR, S(7), theme_.colors.paperElevated, theme_.colors.paperEdge, S(1));
     DrawSurfaceFrame(todayR, S(7), theme_.colors.paperElevated, theme_.colors.paperEdge, S(1));
+    smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
     Text(L"<", prevR, theme_.colors.textWeak, smallFormat_);
     Text(L">", nextR, theme_.colors.textWeak, smallFormat_);
     Text(T(Str::CalendarToday, lang_), todayR, theme_.colors.text, smallFormat_);
     smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-
-    // —— 全天行（轻底色 + 标签）——
-    D2D1_RECT_F allDay = offRect(frame.allDay);
-    FillRoundRect(D2D1_ROUNDED_RECT{ allDay, S(7), S(7) }, soft);
-    D2D1_RECT_F allDayLabel = allDay;
-    allDayLabel.left += S(10);
-    allDayLabel.right = allDayLabel.left + S(54);
-    Text(T(Str::AllDay, lang_), allDayLabel, theme_.colors.textWeak, smallFormat_);
 
     // —— 时间轴 ——
     const float tlTop = top + frame.timelineViewport.top;
@@ -855,16 +837,6 @@ void MainWindow::DrawCalendarView(float W, float H) {
 
     rt_->SetTransform(D2D1::Matrix3x2F::Identity());
     rt_->PopAxisAlignedClip();
-
-    // —— 底部状态提示 ——
-    D2D1_RECT_F statusR = offRect(frame.statusBar);
-    if (statusR.bottom > statusR.top) {
-        FillRect(statusR, soft);
-        D2D1_RECT_F hintR = statusR;
-        hintR.left += S(12);
-        hintR.right -= S(12);
-        Text(T(Str::CalendarHint, lang_), hintR, theme_.colors.textWeak, smallFormat_);
-    }
 }
 
 bool MainWindow::Render() {

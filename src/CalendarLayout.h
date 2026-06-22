@@ -12,11 +12,9 @@ struct Frame {
     Gui::Rect prevDay;
     Gui::Rect nextDay;
     Gui::Rect today;
-    Gui::Rect allDay;
     Gui::Rect timelineViewport;
     Gui::Rect gutter;
     Gui::Rect lane;
-    Gui::Rect statusBar;
     float hourHeight = 0.0f;
     float contentHeight = 0.0f;
 };

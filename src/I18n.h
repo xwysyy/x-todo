@@ -15,9 +15,6 @@ enum class Str {
     Exit,         // 退出
     Calendar,     // 日历标签
     CalendarToday,// 日历回到今天按钮
-    CalendarStats,// 日历统计格式串（块数 / 小时 / 冲突）
-    CalendarHint, // 日历底部操作提示
-    AllDay,       // 全天行
     EmptyListTitle,// 当前列表为空
     EmptyActivePrompt,// 点击创建第一条
     ListNamePrompt,// 标签页名称输入提示

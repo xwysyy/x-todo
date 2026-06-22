@@ -25,10 +25,8 @@ int Digit(wchar_t ch) {
 
 Frame ComputeFrame(float windowWidth, float viewportHeight, float dpiScale) {
     const float pad = S(Theme::kPadX, dpiScale);
-    const float headerH = S(52.0f, dpiScale);
-    const float allDayH = S(32.0f, dpiScale);
-    const float statusH = S(24.0f, dpiScale);
-    const float timelineTop = headerH + allDayH + S(8.0f, dpiScale);
+    const float headerH = S(40.0f, dpiScale);
+    const float timelineTop = headerH + S(8.0f, dpiScale);
     const float gutterW = S(54.0f, dpiScale);
     const float hourH = S(56.0f, dpiScale);
     const float navSize = S(26.0f, dpiScale);
@@ -43,15 +41,12 @@ Frame ComputeFrame(float windowWidth, float viewportHeight, float dpiScale) {
                              windowWidth - pad, navTop + navSize };
     out.today = Gui::Rect{ out.nextDay.left - gap - todayW, navTop,
                            out.nextDay.left - gap, navTop + navSize };
-    out.allDay = Gui::Rect{ pad, headerH, windowWidth - pad, headerH + allDayH };
 
-    float timelineBottom = viewportHeight - statusH;
+    float timelineBottom = viewportHeight;
     if (timelineBottom < timelineTop) timelineBottom = timelineTop;
     out.timelineViewport = Gui::Rect{ 0.0f, timelineTop, windowWidth, timelineBottom };
     out.gutter = Gui::Rect{ 0.0f, timelineTop, gutterW, timelineBottom };
     out.lane = Gui::Rect{ gutterW, timelineTop, windowWidth - pad, timelineBottom };
-    out.statusBar = Gui::Rect{ 0.0f, timelineBottom, windowWidth,
-                               viewportHeight > timelineBottom ? viewportHeight : timelineBottom };
     out.hourHeight = hourH;
     out.contentHeight = 24.0f * hourH;
     return out;
