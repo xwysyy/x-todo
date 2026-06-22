@@ -1183,14 +1183,13 @@ void MainWindow::ReloadThemes() {
 void MainWindow::ApplyResolvedTheme(bool persist) {
     themeNotices_.clear(); // notice 反映最近一次解析状态，不累积
 
-    bool darkOk = false, hcOk = false;
+    bool darkOk = false;
     Theme::ResolveInput in;
     in.mode               = ui_.themeMode;
     in.themeId            = ui_.themeId;
     in.lightThemeId       = ui_.lightThemeId;
     in.darkThemeId        = ui_.darkThemeId;
     in.systemDark         = Theme::SystemUsesDarkMode(&darkOk);
-    in.systemHighContrast = Theme::SystemHighContrastOn(&hcOk);
     in.customThemes       = &customThemes_;
 
     Theme::ResolveResult rr = Theme::ResolveTheme(in);
@@ -1200,18 +1199,12 @@ void MainWindow::ApplyResolvedTheme(bool persist) {
     if (!darkOk)
         themeNotices_.push_back({ lang_ == Lang::Zh ? L"无法读取系统明暗模式，已按浅色处理"
                                                     : L"Could not read system light/dark mode; using light" });
-    if (!hcOk)
-        themeNotices_.push_back({ lang_ == Lang::Zh ? L"无法读取系统高对比状态，已按未开启处理"
-                                                    : L"Could not read system high-contrast state; assuming off" });
 
     if (rr.fellBack) {
         std::wstring msg = T(Str::ThemeFallbackNotice, lang_);
         if (!rr.message.empty()) msg += L"（" + rr.message + L"）";
         themeNotices_.push_back({ msg });
     }
-    // 系统高对比但用户显式选了非高对比主题：提示当前主题可能不可访问
-    if (in.systemHighContrast && ui_.themeMode != "follow_system" && theme_.id != "contrast")
-        themeNotices_.push_back({ T(Str::ThemeHighContrastNotice, lang_) });
 
     // 编辑框背景刷随主题失效，下次 WM_CTLCOLOREDIT 按新主题重建
     if (editBg_) { DeleteObject(editBg_); editBg_ = nullptr; }
@@ -1342,19 +1335,13 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_SETTINGCHANGE:
-        // follow_system：系统明暗 / 高对比变化时，仅当解析出的主题 id 变化才重新应用，避免抖动
+        // follow_system：系统明暗变化时，仅当解析出的主题 id 变化才重新应用，避免抖动
         if (ui_.themeMode == "follow_system") {
             bool sysDark = Theme::SystemUsesDarkMode(nullptr);
-            bool sysHC   = Theme::SystemHighContrastOn(nullptr);
-            std::string wantId = sysHC ? "contrast" : (sysDark ? ui_.darkThemeId : ui_.lightThemeId);
+            std::string wantId = sysDark ? ui_.darkThemeId : ui_.lightThemeId;
             if (wantId != theme_.id) ApplyResolvedTheme(false);
         }
         break; // 落到 DefWindowProc，保留系统默认处理
-
-    case WM_SYSCOLORCHANGE:
-        // 高对比是系统可访问性状态，参与主题解析：重读并重新应用
-        ApplyResolvedTheme(false);
-        break;
 
     case WM_THEMECHANGED:
     case WM_DWMCOLORIZATIONCOLORCHANGED:

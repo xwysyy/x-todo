@@ -37,7 +37,7 @@ X-TODO is an always-on desktop to-do note. A frameless slip stays on your deskto
 - **Three layouts:** a normal window, sunk into the desktop, or folded into a side capsule that slides out on hover.
 - **Saves itself.** Reopens exactly as you left it; the data is a single text file.
 - **Stays in the tray.** Closing hides it, a double-click brings it back, startup launch is optional.
-- **Themeable.** Built-in light, dark, and high-contrast themes; follows the system light/dark mode, or load your own theme files.
+- **Themeable.** Five built-in light themes; load your own theme files, or follow the system light/dark mode.
 - **Pure Win32 + Direct2D.** No .NET, no browser engine, one portable exe.
 
 ## Download
@@ -63,7 +63,7 @@ Open [Releases](https://github.com/xwysyy/X-TODO/releases), download `x-todo.exe
 
 ## Themes
 
-Eight built-in themes: Paper, Mint, Sky, Rose, Sand, Graphite, Ink, and High contrast. Right-click the tray icon or open the title-bar menu and pick one under "Theme". Choose "Follow system" to track the Windows light/dark mode automatically, and the high-contrast theme kicks in when Windows turns high contrast on. Switching a theme recolors the main window, the side capsule, menus, the confirm dialog, and the inline editor. The tray keeps the app icon fixed.
+Five built-in themes: Paper, Mint, Sky, Rose, and Sand. Right-click the tray icon or open the title-bar menu and pick one under "Theme". Choose "Follow system" to track the Windows light/dark mode automatically. Switching a theme recolors the main window, the side capsule, menus, the confirm dialog, and the inline editor. The tray keeps the app icon fixed.
 
 ### Custom themes
 

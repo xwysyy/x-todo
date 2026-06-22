@@ -61,18 +61,6 @@ ResolveResult ResolveTheme(const ResolveInput& in) {
         return FindBuiltIn(id); // 其余 id：只查内置表
     };
 
-    // follow_system + 系统高对比：优先解析内置 contrast（无障碍）。
-    // builtin / custom 模式视为用户已显式选择：高对比下保持其选择，由 MainWindow 记录可见
-    // notice 提示当前主题可能不可访问（spec §11 第二条）。首启默认 paper 在高对比下自动切
-    // contrast（spec §11 第一条）需要一个“是否显式选择过主题”的持久化状态来区分默认 paper 与
-    // 显式选的 paper，否则会误覆盖显式选择——该状态不在 §6.2 字段集内，留作产品决策。
-    if (in.mode == "follow_system" && in.systemHighContrast) {
-        if (const ThemeVisual* c = FindBuiltIn("contrast")) {
-            out.theme = *c;
-            return out;
-        }
-    }
-
     std::string wantId;
     if (in.mode == "follow_system")
         wantId = in.systemDark ? in.darkThemeId : in.lightThemeId;
@@ -107,23 +95,8 @@ bool SystemUsesDarkMode(bool* ok) {
     if (ok) *ok = true;
     return value == 0; // AppsUseLightTheme==0 表示深色
 }
-
-bool SystemHighContrastOn(bool* ok) {
-    if (ok) *ok = false;
-    HIGHCONTRASTW hc{};
-    hc.cbSize = sizeof(hc);
-    if (!SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, 0))
-        return false; // 读取失败：按未开启
-    if (ok) *ok = true;
-    return (hc.dwFlags & HCF_HIGHCONTRASTON) != 0;
-}
 #else
 bool SystemUsesDarkMode(bool* ok) {
-    if (ok) *ok = false;
-    return false;
-}
-
-bool SystemHighContrastOn(bool* ok) {
     if (ok) *ok = false;
     return false;
 }

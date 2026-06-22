@@ -26,7 +26,7 @@ void ColorHelpersConvertClampAndMeasureContrast() {
 
 void BuiltInCatalogIsStableUniqueAndAccessible() {
     const std::vector<std::string> expectedIds = {
-        "paper", "mint", "sky", "rose", "sand", "graphite", "ink", "contrast",
+        "paper", "mint", "sky", "rose", "sand",
     };
 
     const auto& themes = Theme::BuiltInThemes();
@@ -50,8 +50,8 @@ void BuiltInCatalogIsStableUniqueAndAccessible() {
     }
 
     EXPECT_TRUE(Theme::FindBuiltIn("paper") != nullptr);
-    EXPECT_TRUE(Theme::IsBuiltInId("graphite"));
-    EXPECT_FALSE(Theme::IsBuiltInId("custom.graphite"));
+    EXPECT_TRUE(Theme::IsBuiltInId("sand"));
+    EXPECT_FALSE(Theme::IsBuiltInId("custom.sand"));
     EXPECT_EQ(Theme::DefaultTheme().id, std::string("paper"));
 }
 
@@ -81,23 +81,16 @@ void ResolveThemeHonorsBuiltinCustomFollowSystemAndFallback() {
 
     input.mode = "follow_system";
     input.lightThemeId = "sky";
-    input.darkThemeId = "graphite";
+    input.darkThemeId = "sand";
     input.systemDark = false;
-    input.systemHighContrast = false;
     result = Theme::ResolveTheme(input);
     EXPECT_EQ(result.theme.id, std::string("sky"));
 
     input.systemDark = true;
     result = Theme::ResolveTheme(input);
-    EXPECT_EQ(result.theme.id, std::string("graphite"));
-
-    input.systemHighContrast = true;
-    result = Theme::ResolveTheme(input);
-    EXPECT_EQ(result.theme.id, std::string("contrast"));
-    EXPECT_FALSE(result.fellBack);
+    EXPECT_EQ(result.theme.id, std::string("sand"));
 
     input.mode = "builtin";
-    input.systemHighContrast = false;
     input.themeId = "missing";
     result = Theme::ResolveTheme(input);
     EXPECT_EQ(result.theme.id, std::string("paper"));
@@ -141,14 +134,6 @@ void NonWindowsSystemReadersFailClosed() {
     (void)dark;
 #endif
 
-    ok = true;
-    const bool highContrast = Theme::SystemHighContrastOn(&ok);
-#ifndef _WIN32
-    EXPECT_FALSE(highContrast);
-    EXPECT_FALSE(ok);
-#else
-    (void)highContrast;
-#endif
 }
 
 const TestCase kTests[] = {

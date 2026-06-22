@@ -357,8 +357,8 @@ void ThemeMenuBuildsStableCommandRangesAndCustomCap() {
     const std::vector<GuiMenu::Item> menu = GuiMenu::BuildThemeMenu(state);
     EXPECT_TRUE(FindCommand(menu, GuiMenu::kCmdThemeFollowSystem) != nullptr);
     EXPECT_EQ(std::string(GuiMenu::BuiltInThemeIdForCommand(GuiMenu::kCmdThemeBuiltinBase)), std::string("paper"));
-    EXPECT_EQ(std::string(GuiMenu::BuiltInThemeIdForCommand(GuiMenu::kCmdThemeBuiltinBase + 7)), std::string("contrast"));
-    EXPECT_TRUE(GuiMenu::BuiltInThemeIdForCommand(GuiMenu::kCmdThemeBuiltinBase + 8) == nullptr);
+    EXPECT_EQ(std::string(GuiMenu::BuiltInThemeIdForCommand(GuiMenu::kCmdThemeBuiltinBase + 4)), std::string("sand"));
+    EXPECT_TRUE(GuiMenu::BuiltInThemeIdForCommand(GuiMenu::kCmdThemeBuiltinBase + 5) == nullptr);
 
     int customCount = 0;
     bool currentCustomChecked = false;

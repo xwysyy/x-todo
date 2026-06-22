@@ -44,10 +44,10 @@ constexpr BuiltInThemeItem kBuiltInThemes[] = {
     { "sky", Str::ThemeSky },
     { "rose", Str::ThemeRose },
     { "sand", Str::ThemeSand },
-    { "graphite", Str::ThemeGraphite },
-    { "ink", Str::ThemeInk },
-    { "contrast", Str::ThemeContrast },
 };
+
+constexpr unsigned int kBuiltInThemeCount =
+    sizeof(kBuiltInThemes) / sizeof(kBuiltInThemes[0]);
 
 } // namespace
 
@@ -69,7 +69,7 @@ std::vector<Item> BuildThemeMenu(const State& state) {
     items.push_back(Item{ kCmdThemeFollowSystem, T(Str::ThemeFollowSystem, state.lang), false,
                           state.themeMode == "follow_system", false, true, 1 });
 
-    for (unsigned int i = 0; i < 8; ++i) {
+    for (unsigned int i = 0; i < kBuiltInThemeCount; ++i) {
         const bool current = state.themeMode != "follow_system" &&
                              state.currentThemeId == kBuiltInThemes[i].id;
         items.push_back(Item{ kCmdThemeBuiltinBase + i, T(kBuiltInThemes[i].name, state.lang),
@@ -98,7 +98,9 @@ std::vector<Item> BuildListTabMenu(Lang lang, int listCount) {
 }
 
 const char* BuiltInThemeIdForCommand(Command cmd) {
-    if (cmd < kCmdThemeBuiltinBase || cmd >= kCmdThemeBuiltinBase + 8) return nullptr;
+    if (cmd < kCmdThemeBuiltinBase ||
+        cmd >= kCmdThemeBuiltinBase + static_cast<int>(kBuiltInThemeCount))
+        return nullptr;
     return kBuiltInThemes[cmd - kCmdThemeBuiltinBase].id;
 }
 

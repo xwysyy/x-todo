@@ -31,9 +31,11 @@ The expected built-in ids are:
 - `sky`
 - `rose`
 - `sand`
-- `graphite`
-- `ink`
-- `contrast`
+
+All built-in themes are light. There is no built-in dark or high-contrast
+theme. The earlier `graphite`, `ink`, and `contrast` themes were removed
+because this is a single-user build that does not need dark or accessibility
+themes.
 
 Hover, pressed, danger, row, menu, and capsule colors are final consumer
 colors. Rendering code should not reintroduce ad hoc alpha blends for theme
@@ -53,10 +55,9 @@ substring searches, because `theme_id` is contained inside `light_theme_id`
 and `dark_theme_id`.
 
 `follow_system` reads Windows app light or dark mode from
-`AppsUseLightTheme`. When Windows high contrast is active, `follow_system`
-resolves to the built-in `contrast` theme. In `builtin` and `custom` modes,
-the selected theme is preserved and the app records a visible notice if high
-contrast may make that theme inaccessible.
+`AppsUseLightTheme` and resolves to `light_theme_id` or `dark_theme_id`.
+Because no built-in dark theme remains, `dark_theme_id` defaults to `paper`.
+Windows high contrast is not read and does not affect theme resolution.
 
 Failed theme resolution falls back to built-in `paper` and records a notice.
 Invalid theme fields must not trigger the corrupt-data backup path and must
@@ -123,7 +124,7 @@ code path actually does.
   contrast, and handle-bound export behavior before loosening validation.
 - Check `src/MainWindow.cpp` popup and prompt structs when changing theme
   refresh behavior. Popup snapshots are intentional.
-- Check Windows behavior for dark native edit state, IME, high contrast,
+- Check Windows behavior for dark native edit state, IME,
   Explorer restart tray recovery, DPI scaling, and multi-monitor capsule
   placement before calling a visual theme change complete.
 
@@ -132,6 +133,6 @@ Useful static probes:
 ```sh
 rg -n "Theme::k(Paper|PaperEdge|Text|TextWeak|TextDone|CheckBorder|CheckFill|CheckFillHover|CheckMark|Danger|Divider|Hover|Handle|HandleHover|DragGhost)\b" src
 rg -n "line\.find\(L\".*theme_id" src
-rg -n "WM_SETTINGCHANGE|AppsUseLightTheme|WM_SYSCOLORCHANGE|SPI_GETHIGHCONTRAST" src
+rg -n "WM_SETTINGCHANGE|AppsUseLightTheme" src
 rg -n "FILE_FLAG_OPEN_REPARSE_POINT|GetFinalPathNameByHandleW|custom\.exported" src/ThemeLoader.cpp
 ```

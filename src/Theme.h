@@ -171,7 +171,6 @@ struct ResolveInput {
     std::string lightThemeId; // follow_system 浅色
     std::string darkThemeId;  // follow_system 深色
     bool systemDark          = false;
-    bool systemHighContrast  = false;
     const std::vector<ThemeVisual>* customThemes = nullptr;
 };
 
@@ -188,8 +187,5 @@ ResolveResult ResolveTheme(const ResolveInput& input);
 // 读 HKCU\...\Themes\Personalize\AppsUseLightTheme：0=深色返回 true。
 // 读取失败按浅色处理（返回 false），并把 *ok 置 false。
 bool SystemUsesDarkMode(bool* ok = nullptr);
-// 读 SPI_GETHIGHCONTRAST：HCF_HIGHCONTRASTON 时返回 true。
-// 读取失败按未开启处理（返回 false），并把 *ok 置 false。
-bool SystemHighContrastOn(bool* ok = nullptr);
 
 } // namespace Theme
