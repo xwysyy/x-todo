@@ -4,7 +4,7 @@
 
 # X-TODO
 
-**A sticky to-do note that lives on your desktop.**
+**Your day, pinned to the desktop.**
 
 [![Build](https://github.com/xwysyy/X-TODO/actions/workflows/build.yml/badge.svg)](https://github.com/xwysyy/X-TODO/actions)
 ![Platform](https://img.shields.io/badge/Windows-10%20|%2011-0078D4?logo=windows&logoColor=white)
@@ -18,37 +18,37 @@
 
 ---
 
-X-TODO is an always-on desktop to-do note. A frameless slip stays on your desktop: one line per task, click the checkbox to mark it done. Edits save on their own and come back after a restart, with no account, no network, and nothing to launch. It ships as a single exe and stays within a few MB of RAM.
-
 <div align="center">
 <table>
 <tr>
-<td align="center"><img src=".assets/screenshot.png" width="320" alt="X-TODO screenshot"></td>
-<td align="center"><img src=".assets/demo.gif" width="320" alt="X-TODO demo"></td>
+<td align="center"><img src=".assets/tasks.png" width="250" alt="Tasks"><br><sub><b>Tasks</b></sub></td>
+<td align="center"><img src=".assets/calendar.png" width="250" alt="Calendar"><br><sub><b>Calendar</b></sub></td>
+<td align="center"><img src=".assets/capsule.gif" width="250" alt="Side capsule"><br><sub><b>Side capsule</b></sub></td>
 </tr>
 </table>
 </div>
 
-## Features
+## 📌 What is X-TODO
 
-- **One line per task.** Tick the box to check it off, press Enter to add the next one.
-- **Nested tasks.** Press Tab while editing to indent, Shift+Tab to outdent, and fold child items under their parent.
-- **Drag to reorder.** Move an item with its children. Finished blocks fold into a collapsible "Completed" section, and every delete asks first.
-- **Three layouts:** a normal window, sunk into the desktop, or folded into a side capsule that slides out on hover.
-- **Saves itself.** Reopens exactly as you left it; the data is a single text file.
-- **Auto backup.** Pick a folder in Settings, and X-TODO mirrors `data.json` there about once per hour.
-- **Stays in the tray.** Closing hides it, a double-click brings it back, startup launch is optional.
-- **Settings in one place.** Language, startup launch, and data backup live in Settings instead of filling the tray menu.
-- **Themeable.** Five built-in light themes; load your own theme files, or follow the system light/dark mode.
-- **Pure Win32 + Direct2D.** No .NET, no browser engine, one portable exe.
+**X-TODO** is a lightweight desktop planner for Windows that keeps your task list and your daily schedule in one always-on note. Write tasks as a **nested outline**, then switch to the **calendar** and block them onto a real day, week, or month timeline. When you need the screen back, fold the whole thing into a **side capsule** at the edge. It runs as a single native exe and saves everything to one local file, reopening exactly where you left it.
 
-## Download
+## ✨ Features
+
+- **Outline-style tasks.** One line per task, up to three levels deep. Fold a parent, drag a branch to reorder, and finished items collapse into a Completed section.
+- **Day / week / month calendar.** In day view, drag across empty hours to block out time; drag a block to move it, drag its edges to resize, all snapping to 15 minutes. Week and month give the overview, and clicking a day opens it for editing.
+- **Three desktop modes.** Keep it as a normal window, sink it into the desktop, or fold it into a side capsule that slides out on hover.
+- **Local-first storage.** Everything is a single JSON file in `%APPDATA%`, with optional hourly backup to a folder you choose.
+- **Themeable.** Five built-in light themes, custom `.xtheme` files, or follow the Windows light/dark mode.
+- **Stays in the tray.** Closing hides it, a double-click brings it back, and startup launch is optional.
+- **Native and small.** Pure Win32 + Direct2D, one portable exe, about 1 MB.
+
+## 📥 Download
 
 Open [Releases](https://github.com/xwysyy/X-TODO/releases), download `x-todo.exe` from the latest version, and double-click it. Portable, no install. Development builds are still available from the [Actions](https://github.com/xwysyy/X-TODO/actions) artifacts.
 
 > Tasks are stored in `%APPDATA%\x-todo\data.json`. Settings can also mirror that file to `<backup folder>\data.json`. Uninstalling leaves the app data folder untouched; copy it to another machine and your list comes along.
 
-## Usage
+## ⌨️ Usage
 
 | Action | How |
 | :-- | :-- |
@@ -62,14 +62,18 @@ Open [Releases](https://github.com/xwysyy/X-TODO/releases), download `x-todo.exe
 | Reorder | Drag the handle on the right of an item; child items move with it |
 | Move / resize | Drag the title bar to move, drag the edges to resize |
 | Switch layout | Right-click the tray icon: normal window / desktop / side capsule |
+| Open calendar | Click the calendar button in the title bar to switch between lists and the calendar |
+| Block time | In day view, drag across empty hours to create a block; drag its body to move, drag its edges to resize |
+| Edit a block | Click a block to edit its title and start/end time inline; right-click to delete |
+| Calendar view | Use the Day / Week / Month control in the calendar header; click a day in week or month to open it |
 | Settings | Open Settings from the title-bar or tray menu to change language, startup launch, and backup folder |
 | Backup | Pick a folder in Settings; X-TODO overwrites `<folder>\data.json` about once per hour |
 
-## Themes
+## 🎨 Themes
 
 Five built-in themes: Paper, Mint, Sky, Rose, and Sand. Right-click the tray icon or open the title-bar menu and pick one under "Theme". Choose "Follow system" to track the Windows light/dark mode automatically. Switching a theme recolors the main window, menus, the confirm dialog, the Settings window, the theme manager, and the inline editor. The folded side entry and tray keep fixed app colors.
 
-### Custom themes
+### 🖌️ Custom themes
 
 Drop a `.xtheme` file into `%APPDATA%\x-todo\themes\` and click "Reload" in the theme manager. The file is strict JSON describing colors and display names only — no images, scripts, URLs, or external paths. Rough shape:
 
@@ -87,7 +91,7 @@ Drop a `.xtheme` file into `%APPDATA%\x-todo\themes\` and click "Reload" in the 
 
 Colors are `#rrggbb`. The full field set (21 in `colors`, 10 in `capsule`, 4 in `tray`) is large; "Export current theme" in the theme manager writes a ready-to-edit template. The folded side entry uses fixed app colors; `capsule` remains in the theme format.
 
-## Build
+## 🛠️ Build
 
 On push, GitHub Actions builds it with MSVC and uploads the exe to that run's Artifacts. Version tags such as `v0.1.0` also publish a GitHub Release with the exe attached.
 
@@ -100,7 +104,7 @@ cmake --build build --config MinSizeRel
 
 Stack: C++17, Win32, Direct2D / DirectWrite, CMake, statically linked CRT, single exe.
 
-## License
+## 📄 License
 
 [MIT](LICENSE)
 
