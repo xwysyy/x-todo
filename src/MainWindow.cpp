@@ -1227,7 +1227,7 @@ void MainWindow::ApplyResolvedTheme(bool persist) {
     if (calendarEndEdit_ && IsWindow(calendarEndEdit_) && IsWindowVisible(calendarEndEdit_))
         InvalidateRect(calendarEndEdit_, nullptr, TRUE);
 
-    UpdateLayeredState();        // Slim 胶囊透明度使用新主题 slimAlpha
+    UpdateLayeredState();        // 折叠侧边入口使用固定色 per-pixel alpha
     RefreshTrayIcon();           // 保持托盘使用固定应用图标
     if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
     if (persist) ScheduleSave();
@@ -1338,7 +1338,7 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
             RECT t = capsuleExpanded_ ? ExpandedTargetRect() : CapsuleTargetRect();
             SetWindowPos(hwnd_, HWND_TOPMOST, t.left, t.top,
                          t.right - t.left, t.bottom - t.top, SWP_NOACTIVATE);
-            UpdateLayeredState(); // 顺带刷新 alpha 与圆点区域
+            UpdateLayeredState(); // 顺带刷新折叠入口 alpha
         }
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
@@ -1985,8 +1985,8 @@ RECT MainWindow::CapsuleTargetRect() const {
     if (DockMonitorInfo(mi)) wa = mi.rcWork;
     else SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
 
-    int cw = (int)S(capsuleStyle_ == CapsuleStyle::Dot ? Theme::kCapsuleDot : Theme::kCapsuleSlimW);
-    int ch = (int)S(capsuleStyle_ == CapsuleStyle::Dot ? Theme::kCapsuleDot : Theme::kCapsuleSlimH);
+    int cw = (int)S(capsuleStyle_ == CapsuleStyle::Dot ? Theme::kCapsuleOrbW : Theme::kCapsulePetW);
+    int ch = (int)S(capsuleStyle_ == CapsuleStyle::Dot ? Theme::kCapsuleOrbH : Theme::kCapsulePetH);
     int workW = wa.right - wa.left, workH = wa.bottom - wa.top;
     if (workW > 0 && cw > workW) cw = workW; // 防胶囊大于工作区致 ClampInt 边界反转
     if (workH > 0 && ch > workH) ch = workH;
@@ -2087,11 +2087,10 @@ void MainWindow::SetCapsuleStyle(CapsuleStyle s) {
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
-// 按当前样式 / 折叠 / hover 维护 layered 模式。Slim 用整窗 alpha，Dot 折叠用 per-pixel alpha。
+// 按当前样式 / 折叠状态维护 layered 模式。折叠入口使用固定色 per-pixel alpha。
 void MainWindow::UpdateLayeredState() {
-    const bool wantSlimAlpha = (mountMode_ == MountMode::Capsule && capsuleStyle_ == CapsuleStyle::Slim);
-    const bool wantDotAlpha  = (mountMode_ == MountMode::Capsule && capsuleStyle_ == CapsuleStyle::Dot && capsuleShrunk());
-    const int wantedMode = wantDotAlpha ? 2 : (wantSlimAlpha ? 1 : 0);
+    const bool wantEntryAlpha = (mountMode_ == MountMode::Capsule && capsuleShrunk());
+    const int wantedMode = wantEntryAlpha ? 2 : 0;
 
     if (layeredMode_ != wantedMode) {
         const int oldMode = layeredMode_;
@@ -2111,29 +2110,20 @@ void MainWindow::UpdateLayeredState() {
         if (oldMode == 2 || wantedMode == 2) DiscardDeviceResources();
     }
 
-    if (wantedMode == 1) {
-        BYTE alpha = (capsuleShrunk() && !capsuleHover_)
-                     ? (BYTE)(theme_.capsule.slimAlpha * 255.0f) : 255;
-        SetLayeredWindowAttributes(hwnd_, 0, alpha, LWA_ALPHA);
-    }
     UpdateCapsuleRegion(); // 形态 / 样式 / 折叠变化时同步窗口区域与 DWM 边界属性
 }
 
-// Dot 折叠态由 per-pixel layered alpha 定形；Slim 折叠态交给 DWM 圆角合成，避免 GDI region 硬边。
-// Dot 折叠态额外压制系统矩形阴影，避免透明圆点外露出方框。
+// 折叠入口由 per-pixel layered alpha 定形，额外压制系统矩形阴影。
 // 折叠态压制 DWM 边框线；其余形态恢复矩形 + ROUND。
 void MainWindow::UpdateCapsuleRegion() {
-    const bool slimShrunk = mountMode_ == MountMode::Capsule
-                            && capsuleStyle_ == CapsuleStyle::Slim && capsuleShrunk();
-    const bool dotShrunk  = mountMode_ == MountMode::Capsule
-                            && capsuleStyle_ == CapsuleStyle::Dot  && capsuleShrunk();
-    const bool suppressBorder = slimShrunk || dotShrunk;
+    const bool entryShrunk = mountMode_ == MountMode::Capsule && capsuleShrunk();
+    const bool suppressBorder = entryShrunk;
 
-    SetMainWindowDropShadow(hwnd_, !dotShrunk);
-    int ncPolicy = dotShrunk ? DWMNCRP_DISABLED : DWMNCRP_USEWINDOWSTYLE;
+    SetMainWindowDropShadow(hwnd_, !entryShrunk);
+    int ncPolicy = entryShrunk ? DWMNCRP_DISABLED : DWMNCRP_USEWINDOWSTYLE;
     DwmSetWindowAttribute(hwnd_, DWMWA_NCRENDERING_POLICY, &ncPolicy, sizeof(ncPolicy));
 
-    int corner = dotShrunk ? 1 : 2; // 1=DWMWCP_DONOTROUND, 2=DWMWCP_ROUND
+    int corner = entryShrunk ? 1 : 2; // 1=DWMWCP_DONOTROUND, 2=DWMWCP_ROUND
     DwmSetWindowAttribute(hwnd_, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
 
     COLORREF border = suppressBorder ? 0xFFFFFFFE /* DWMWA_COLOR_NONE */
@@ -2190,7 +2180,7 @@ void MainWindow::SnapCapsuleToNearestEdge() {
     SetWindowPos(hwnd_, HWND_TOPMOST, target.left, target.top,
                  target.right - target.left, target.bottom - target.top, SWP_NOACTIVATE);
     capsuleHover_ = false; // 吸附到新位后清 hover，由后续鼠标移动重新判定
-    UpdateLayeredState();  // 按最终尺寸刷新 alpha 与圆点区域
+    UpdateLayeredState();  // 按最终尺寸刷新折叠入口 alpha
     ScheduleSave();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
@@ -2252,7 +2242,7 @@ void MainWindow::OnAnimTick() {
     if (animStep_ >= kAnimSteps) {
         KillTimer(hwnd_, kAnimTimerId);
         animActive_ = false;
-        UpdateLayeredState(); // 折叠静止 → Slim 恢复半透明
+        UpdateLayeredState(); // 折叠静止 → 恢复 per-pixel 入口
         InvalidateRect(hwnd_, nullptr, FALSE); // 定型后按最终态（胶囊/完整）重绘
     }
 }

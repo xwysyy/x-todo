@@ -12,6 +12,7 @@
 #include <ctime>
 #include <cstdio>
 #include <cwchar>
+#include <cstring>
 #include <string>
 #include <utility>
 
@@ -38,6 +39,369 @@ std::wstring Trim(const std::wstring& s) {
 int RoundToInt(float v) { return (int)(v >= 0.0f ? v + 0.5f : v - 0.5f); }
 constexpr int kHoverEmptyActive = -2;
 constexpr int kHoverAddTask = -3;
+
+struct PixelCanvas {
+    uint32_t* pixels;
+    int w;
+    int h;
+};
+
+double Clamp01(double v) {
+    if (v < 0.0) return 0.0;
+    if (v > 1.0) return 1.0;
+    return v;
+}
+
+int ClampByte(int v) {
+    if (v < 0) return 0;
+    if (v > 255) return 255;
+    return v;
+}
+
+void BlendPixel(const PixelCanvas& c, int x, int y, uint32_t rgb, int alpha) {
+    if (x < 0 || y < 0 || x >= c.w || y >= c.h || alpha <= 0) return;
+    alpha = ClampByte(alpha);
+    uint32_t& dst = c.pixels[y * c.w + x];
+    const int da = (dst >> 24) & 0xff;
+    const int dr = (dst >> 16) & 0xff;
+    const int dg = (dst >> 8) & 0xff;
+    const int db = dst & 0xff;
+    const int sr = (((rgb >> 16) & 0xff) * alpha + 127) / 255;
+    const int sg = (((rgb >> 8) & 0xff) * alpha + 127) / 255;
+    const int sb = ((rgb & 0xff) * alpha + 127) / 255;
+    const int inv = 255 - alpha;
+    const int oa = alpha + (da * inv + 127) / 255;
+    const int orr = sr + (dr * inv + 127) / 255;
+    const int og = sg + (dg * inv + 127) / 255;
+    const int ob = sb + (db * inv + 127) / 255;
+    dst = ((uint32_t)oa << 24) | ((uint32_t)orr << 16) | ((uint32_t)og << 8) | (uint32_t)ob;
+}
+
+double RoundRectSignedDistance(double x, double y, double l, double t, double r, double b, double radius) {
+    const double cx = (l + r) * 0.5;
+    const double cy = (t + b) * 0.5;
+    double hx = (r - l) * 0.5 - radius;
+    double hy = (b - t) * 0.5 - radius;
+    if (hx < 0.0) hx = 0.0;
+    if (hy < 0.0) hy = 0.0;
+    const double qx = std::fabs(x - cx) - hx;
+    const double qy = std::fabs(y - cy) - hy;
+    const double ox = qx > 0.0 ? qx : 0.0;
+    const double oy = qy > 0.0 ? qy : 0.0;
+    const double outside = std::sqrt(ox * ox + oy * oy);
+    const double inside = (qx > qy ? qx : qy);
+    return outside + (inside < 0.0 ? inside : 0.0) - radius;
+}
+
+void FillRoundRectPixels(const PixelCanvas& c, double l, double t, double r, double b,
+                         double radius, uint32_t rgb, int alpha) {
+    const int x0 = (int)std::floor(l - 1.0);
+    const int y0 = (int)std::floor(t - 1.0);
+    const int x1 = (int)std::ceil(r + 1.0);
+    const int y1 = (int)std::ceil(b + 1.0);
+    for (int y = y0; y <= y1; ++y) {
+        for (int x = x0; x <= x1; ++x) {
+            const double sd = RoundRectSignedDistance(x + 0.5, y + 0.5, l, t, r, b, radius);
+            const double cover = Clamp01(0.5 - sd);
+            BlendPixel(c, x, y, rgb, (int)(alpha * cover + 0.5));
+        }
+    }
+}
+
+void StrokeRoundRectPixels(const PixelCanvas& c, double l, double t, double r, double b,
+                           double radius, double stroke, uint32_t rgb, int alpha) {
+    const int x0 = (int)std::floor(l - stroke - 1.0);
+    const int y0 = (int)std::floor(t - stroke - 1.0);
+    const int x1 = (int)std::ceil(r + stroke + 1.0);
+    const int y1 = (int)std::ceil(b + stroke + 1.0);
+    for (int y = y0; y <= y1; ++y) {
+        for (int x = x0; x <= x1; ++x) {
+            const double sd = RoundRectSignedDistance(x + 0.5, y + 0.5, l, t, r, b, radius);
+            const double d = std::fabs(sd) - stroke * 0.5;
+            const double cover = Clamp01(0.5 - d);
+            BlendPixel(c, x, y, rgb, (int)(alpha * cover + 0.5));
+        }
+    }
+}
+
+void FillEllipsePixels(const PixelCanvas& c, double cx, double cy, double rx, double ry,
+                       uint32_t rgb, int alpha) {
+    const int x0 = (int)std::floor(cx - rx - 1.0);
+    const int y0 = (int)std::floor(cy - ry - 1.0);
+    const int x1 = (int)std::ceil(cx + rx + 1.0);
+    const int y1 = (int)std::ceil(cy + ry + 1.0);
+    const double aa = rx < ry ? rx : ry;
+    for (int y = y0; y <= y1; ++y) {
+        for (int x = x0; x <= x1; ++x) {
+            const double dx = (x + 0.5 - cx) / rx;
+            const double dy = (y + 0.5 - cy) / ry;
+            const double sd = (std::sqrt(dx * dx + dy * dy) - 1.0) * aa;
+            const double cover = Clamp01(0.5 - sd);
+            BlendPixel(c, x, y, rgb, (int)(alpha * cover + 0.5));
+        }
+    }
+}
+
+void StrokeEllipsePixels(const PixelCanvas& c, double cx, double cy, double rx, double ry,
+                         double stroke, uint32_t rgb, int alpha) {
+    const int x0 = (int)std::floor(cx - rx - stroke - 1.0);
+    const int y0 = (int)std::floor(cy - ry - stroke - 1.0);
+    const int x1 = (int)std::ceil(cx + rx + stroke + 1.0);
+    const int y1 = (int)std::ceil(cy + ry + stroke + 1.0);
+    const double aa = rx < ry ? rx : ry;
+    for (int y = y0; y <= y1; ++y) {
+        for (int x = x0; x <= x1; ++x) {
+            const double dx = (x + 0.5 - cx) / rx;
+            const double dy = (y + 0.5 - cy) / ry;
+            const double sd = (std::sqrt(dx * dx + dy * dy) - 1.0) * aa;
+            const double d = std::fabs(sd) - stroke * 0.5;
+            const double cover = Clamp01(0.5 - d);
+            BlendPixel(c, x, y, rgb, (int)(alpha * cover + 0.5));
+        }
+    }
+}
+
+void FillLinePixels(const PixelCanvas& c, double x1, double y1, double x2, double y2,
+                    double width, uint32_t rgb, int alpha) {
+    const double minX = x1 < x2 ? x1 : x2;
+    const double maxX = x1 > x2 ? x1 : x2;
+    const double minY = y1 < y2 ? y1 : y2;
+    const double maxY = y1 > y2 ? y1 : y2;
+    const int ix0 = (int)std::floor(minX - width - 1.0);
+    const int iy0 = (int)std::floor(minY - width - 1.0);
+    const int ix1 = (int)std::ceil(maxX + width + 1.0);
+    const int iy1 = (int)std::ceil(maxY + width + 1.0);
+    const double vx = x2 - x1;
+    const double vy = y2 - y1;
+    const double len2 = vx * vx + vy * vy;
+    if (len2 <= 0.0) return;
+    for (int y = iy0; y <= iy1; ++y) {
+        for (int x = ix0; x <= ix1; ++x) {
+            const double px = x + 0.5 - x1;
+            const double py = y + 0.5 - y1;
+            double u = (px * vx + py * vy) / len2;
+            if (u < 0.0) u = 0.0;
+            if (u > 1.0) u = 1.0;
+            const double qx = x1 + u * vx;
+            const double qy = y1 + u * vy;
+            const double dx = x + 0.5 - qx;
+            const double dy = y + 0.5 - qy;
+            const double d = std::sqrt(dx * dx + dy * dy) - width * 0.5;
+            const double cover = Clamp01(0.5 - d);
+            BlendPixel(c, x, y, rgb, (int)(alpha * cover + 0.5));
+        }
+    }
+}
+
+void FillRotatedRoundRectPixels(const PixelCanvas& c, double cx, double cy, double w, double h,
+                                double radius, double radians, uint32_t rgb, int alpha) {
+    const double co = std::cos(radians);
+    const double si = std::sin(radians);
+    const double boundX = std::fabs(co) * w * 0.5 + std::fabs(si) * h * 0.5 + radius + 1.0;
+    const double boundY = std::fabs(si) * w * 0.5 + std::fabs(co) * h * 0.5 + radius + 1.0;
+    const int x0 = (int)std::floor(cx - boundX);
+    const int y0 = (int)std::floor(cy - boundY);
+    const int x1 = (int)std::ceil(cx + boundX);
+    const int y1 = (int)std::ceil(cy + boundY);
+    for (int y = y0; y <= y1; ++y) {
+        for (int x = x0; x <= x1; ++x) {
+            const double dx = x + 0.5 - cx;
+            const double dy = y + 0.5 - cy;
+            const double lx = co * dx + si * dy;
+            const double ly = -si * dx + co * dy;
+            const double sd = RoundRectSignedDistance(lx, ly, -w * 0.5, -h * 0.5, w * 0.5, h * 0.5, radius);
+            const double cover = Clamp01(0.5 - sd);
+            BlendPixel(c, x, y, rgb, (int)(alpha * cover + 0.5));
+        }
+    }
+}
+
+double EntryX(bool rightDock, double designW, double x) {
+    return rightDock ? x : designW - x;
+}
+
+void FillRoundRectDesign(const PixelCanvas& c, bool rightDock, double designW, double scale,
+                         double l, double t, double r, double b, double radius,
+                         uint32_t rgb, int alpha) {
+    double x1 = EntryX(rightDock, designW, l) * scale;
+    double x2 = EntryX(rightDock, designW, r) * scale;
+    if (x1 > x2) {
+        const double tmp = x1;
+        x1 = x2;
+        x2 = tmp;
+    }
+    FillRoundRectPixels(c, x1, t * scale, x2, b * scale, radius * scale, rgb, alpha);
+}
+
+void StrokeRoundRectDesign(const PixelCanvas& c, bool rightDock, double designW, double scale,
+                           double l, double t, double r, double b, double radius, double stroke,
+                           uint32_t rgb, int alpha) {
+    double x1 = EntryX(rightDock, designW, l) * scale;
+    double x2 = EntryX(rightDock, designW, r) * scale;
+    if (x1 > x2) {
+        const double tmp = x1;
+        x1 = x2;
+        x2 = tmp;
+    }
+    StrokeRoundRectPixels(c, x1, t * scale, x2, b * scale, radius * scale, stroke * scale, rgb, alpha);
+}
+
+void FillLineDesign(const PixelCanvas& c, bool rightDock, double designW, double scale,
+                    double x1, double y1, double x2, double y2, double width,
+                    uint32_t rgb, int alpha) {
+    FillLinePixels(c, EntryX(rightDock, designW, x1) * scale, y1 * scale,
+                   EntryX(rightDock, designW, x2) * scale, y2 * scale,
+                   width * scale, rgb, alpha);
+}
+
+void FillRotatedRoundRectDesign(const PixelCanvas& c, bool rightDock, double designW, double scale,
+                                double cx, double cy, double w, double h, double radius,
+                                double degrees, uint32_t rgb, int alpha) {
+    const double pi = 3.14159265358979323846;
+    const double mirroredDegrees = rightDock ? degrees : -degrees;
+    FillRotatedRoundRectPixels(c, EntryX(rightDock, designW, cx) * scale, cy * scale,
+                               w * scale, h * scale, radius * scale,
+                               mirroredDegrees * pi / 180.0, rgb, alpha);
+}
+
+void RotateDesignPoint(double cx, double cy, double localX, double localY, double degrees,
+                       double& outX, double& outY) {
+    const double pi = 3.14159265358979323846;
+    const double rad = degrees * pi / 180.0;
+    const double co = std::cos(rad);
+    const double si = std::sin(rad);
+    outX = cx + co * localX - si * localY;
+    outY = cy + si * localX + co * localY;
+}
+
+void DrawPetCubeSticker(const PixelCanvas& c, bool rightDock, double designW, double scale,
+                        double bodyCx, double bodyCy, double angleDeg,
+                        double localX, double localY, double size, uint32_t rgb) {
+    double globalCx = bodyCx;
+    double globalCy = bodyCy;
+    RotateDesignPoint(bodyCx, bodyCy, localX, localY, angleDeg, globalCx, globalCy);
+    FillRotatedRoundRectDesign(c, rightDock, designW, scale, globalCx, globalCy,
+                               size, size, 3.0, angleDeg, rgb, 245);
+}
+
+void DrawCapsulePetEntry(const PixelCanvas& c, bool rightDock, bool hover) {
+    constexpr double designW = 76.0;
+    constexpr double designH = 128.0;
+    const double scale = c.h / designH;
+    const double cubeLeft = hover ? 16.0 : 26.0;
+    const double cubeAngle = hover ? 5.0 : -8.0;
+    const double cubeCx = cubeLeft + 20.0;
+    const double cubeCy = 62.0;
+
+    FillRoundRectDesign(c, rightDock, designW, scale, 44.0, 88.0, 76.0, 102.0,
+                        12.0, 0x000000, 28);
+    FillRoundRectDesign(c, rightDock, designW, scale, 44.0, 88.0, 76.0, 102.0,
+                        12.0, 0xFFFFFF, 118);
+    StrokeRoundRectDesign(c, rightDock, designW, scale, 44.0, 88.0, 76.0, 102.0,
+                          12.0, 1.0, 0x302B25, 34);
+
+    FillRotatedRoundRectDesign(c, rightDock, designW, scale, cubeCx + 1.5, cubeCy + 5.0,
+                               40.0, 40.0, 11.0, cubeAngle, 0x000000, 40);
+    FillRotatedRoundRectDesign(c, rightDock, designW, scale, cubeCx, cubeCy,
+                               40.0, 40.0, 11.0, cubeAngle, 0x26272B, 255);
+
+    constexpr uint32_t colors[9] = {
+        0x1197D5, 0xF6C12A, 0x40BD54,
+        0xEB513F, 0xFFF7E8, 0x1197D5,
+        0xF27C28, 0x40BD54, 0xEB513F,
+    };
+    const double sticker = 9.5;
+    const double gap = 2.0;
+    const double start = -20.0 + 3.0 + sticker * 0.5;
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            DrawPetCubeSticker(c, rightDock, designW, scale, cubeCx, cubeCy, cubeAngle,
+                               start + col * (sticker + gap),
+                               start + row * (sticker + gap),
+                               sticker, colors[row * 3 + col]);
+        }
+    }
+
+    double eyeX = cubeCx;
+    double eyeY = cubeCy;
+    RotateDesignPoint(cubeCx, cubeCy, -8.5, -1.5, cubeAngle, eyeX, eyeY);
+    FillRotatedRoundRectDesign(c, rightDock, designW, scale, eyeX, eyeY,
+                               5.0, 5.0, 2.5, cubeAngle, 0x1B1D21, 250);
+    RotateDesignPoint(cubeCx, cubeCy, 6.5, -1.5, cubeAngle, eyeX, eyeY);
+    FillRotatedRoundRectDesign(c, rightDock, designW, scale, eyeX, eyeY,
+                               5.0, 5.0, 2.5, cubeAngle, 0x1B1D21, 250);
+
+    const int zAlpha = hover ? 120 : 168;
+    FillLineDesign(c, rightDock, designW, scale, 54.0, 25.0, 62.0, 25.0, 2.0, 0x2F77D4, zAlpha);
+    FillLineDesign(c, rightDock, designW, scale, 62.0, 25.0, 54.0, 34.0, 2.0, 0x2F77D4, zAlpha);
+    FillLineDesign(c, rightDock, designW, scale, 54.0, 34.0, 62.0, 34.0, 2.0, 0x2F77D4, zAlpha);
+}
+
+void FillOrbBody(const PixelCanvas& c, double cx, double cy, double r) {
+    const int x0 = (int)std::floor(cx - r - 1.0);
+    const int y0 = (int)std::floor(cy - r - 1.0);
+    const int x1 = (int)std::ceil(cx + r + 1.0);
+    const int y1 = (int)std::ceil(cy + r + 1.0);
+    for (int y = y0; y <= y1; ++y) {
+        for (int x = x0; x <= x1; ++x) {
+            const double dx = x + 0.5 - cx;
+            const double dy = y + 0.5 - cy;
+            const double dist = std::sqrt(dx * dx + dy * dy);
+            const double cover = Clamp01(0.5 - (dist - r));
+            if (cover <= 0.0) continue;
+            const bool top = (y + 0.5) < cy;
+            const uint32_t rgb = top ? 0xFFFFFF : 0x2F77D4;
+            const int alpha = top ? 184 : 92;
+            BlendPixel(c, x, y, rgb, (int)(alpha * cover + 0.5));
+        }
+    }
+}
+
+void DrawCapsuleOrbEntry(const PixelCanvas& c, bool rightDock, bool hover) {
+    constexpr double designW = 70.0;
+    constexpr double designH = 120.0;
+    const double scale = c.h / designH;
+    const double orbLeft = hover ? 4.0 : 30.0;
+    const double orbTop = 31.0;
+    const double r = 29.0 * scale;
+    const double cx = EntryX(rightDock, designW, orbLeft + 29.0) * scale;
+    const double cy = (orbTop + 29.0) * scale;
+
+    FillEllipsePixels(c, cx + (rightDock ? 2.0 : -2.0) * scale, cy + 6.0 * scale,
+                      r * 0.92, r * 0.80, 0x000000, 38);
+    FillOrbBody(c, cx, cy, r);
+    StrokeEllipsePixels(c, cx, cy, r - 0.5 * scale, r - 0.5 * scale, 1.0 * scale, 0x302B25, 34);
+    FillLinePixels(c, cx - 23.0 * scale, cy - 2.0 * scale, cx + 23.0 * scale, cy - 2.0 * scale,
+                   4.0 * scale, 0x272623, 38);
+    FillEllipsePixels(c, cx, cy - 7.0 * scale, 8.0 * scale, 8.0 * scale, 0xFFFAF0, 230);
+    StrokeEllipsePixels(c, cx, cy - 7.0 * scale, 8.0 * scale, 8.0 * scale,
+                        3.0 * scale, 0x272623, 36);
+
+    const double stickerSize = 9.0;
+    const double gap = 2.0;
+    const double gridLeft = orbLeft + 8.0;
+    const double gridTop = orbTop + 8.0;
+    const double angle = rightDock ? -16.0 : 16.0;
+    constexpr uint32_t colors[9] = {
+        0xF6C12A, 0x1197D5, 0x40BD54,
+        0xEB513F, 0xFFF7E8, 0x40BD54,
+        0xF27C28, 0x1197D5, 0xEB513F,
+    };
+    const double gridCx = gridLeft + (stickerSize * 3.0 + gap * 2.0) * 0.5;
+    const double gridCy = gridTop + (stickerSize * 3.0 + gap * 2.0) * 0.5;
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            const double localX = -(stickerSize + gap) + col * (stickerSize + gap);
+            const double localY = -(stickerSize + gap) + row * (stickerSize + gap);
+            double sx = gridCx;
+            double sy = gridCy;
+            RotateDesignPoint(gridCx, gridCy, localX, localY, angle, sx, sy);
+            FillRotatedRoundRectDesign(c, rightDock, designW, scale, sx, sy,
+                                       stickerSize, stickerSize, 2.0, angle,
+                                       colors[row * 3 + col], 232);
+        }
+    }
+}
 
 std::wstring ReadWindowText(HWND hwnd) {
     int len = GetWindowTextLengthW(hwnd);
@@ -1354,36 +1718,14 @@ void MainWindow::DrawCalendarMonth(float W, float H) {
 }
 
 bool MainWindow::Render() {
-    if (capsuleShrunk() && capsuleStyle_ == CapsuleStyle::Dot)
-        return RenderDotCapsuleLayered();
+    if (capsuleShrunk())
+        return RenderCapsuleEntryLayered();
 
     if (!CreateDeviceResources()) return false;
 
     RECT rc;
     GetClientRect(hwnd_, &rc);
     float W = (float)(rc.right - rc.left), H = (float)(rc.bottom - rc.top);
-
-    if (capsuleShrunk()) { // 折叠胶囊：按样式绘制
-        rt_->BeginDraw();
-        rt_->SetTransform(D2D1::Matrix3x2F::Identity());
-        const int n = model_.TotalActiveCount();
-        rt_->Clear(Theme::D2DColor(theme_.capsule.slimPaper));
-        const float radius = W < H ? W * 0.5f : H * 0.5f;
-        D2D1_ROUNDED_RECT rr{ D2D1::RectF(0.75f, 0.75f, W - 0.75f, H - 0.75f), radius, radius };
-        brush_->SetColor(Theme::D2DColor(theme_.capsule.slimEdge));
-        rt_->DrawRoundedRectangle(rr, brush_, S(1.5f));
-        wchar_t buf[16];
-        swprintf_s(buf, L"%d", n);
-        brush_->SetColor(Theme::D2DColor(n > 0 ? theme_.capsule.slimText : theme_.colors.textWeak));
-        smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        rt_->DrawTextW(buf, (UINT32)wcslen(buf), smallFormat_, D2D1::RectF(0, 0, W, H), brush_);
-        smallFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-        if (rt_->EndDraw() == (HRESULT)D2DERR_RECREATE_TARGET) {
-            DiscardDeviceResources();
-            return false;
-        }
-        return true;
-    }
 
     rt_->BeginDraw();
     rt_->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -1428,7 +1770,7 @@ bool MainWindow::Render() {
     return true;
 }
 
-bool MainWindow::RenderDotCapsuleLayered() {
+bool MainWindow::RenderCapsuleEntryLayered() {
     if (layeredMode_ != 2) UpdateLayeredState();
 
     RECT client{};
@@ -1436,14 +1778,6 @@ bool MainWindow::RenderDotCapsuleLayered() {
     const int w = client.right - client.left;
     const int h = client.bottom - client.top;
     if (w <= 0 || h <= 0) return false;
-
-    const int n = model_.TotalActiveCount();
-    const uint32_t rgb = capsuleHover_
-        ? (n > 0 ? theme_.capsule.dotActiveHover : theme_.capsule.dotIdleHover)
-        : (n > 0 ? theme_.capsule.dotActive : theme_.capsule.dotIdle);
-    const int r = (rgb >> 16) & 0xff;
-    const int g = (rgb >> 8) & 0xff;
-    const int b = rgb & 0xff;
 
     BITMAPINFO bi{};
     bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -1465,26 +1799,13 @@ bool MainWindow::RenderDotCapsuleLayered() {
         return false;
     }
 
-    uint32_t* px = static_cast<uint32_t*>(bits);
-    const double cx = w * 0.5;
-    const double cy = h * 0.5;
-    const double radius = (w < h ? w : h) * 0.5 - 0.5;
-    for (int y = 0; y < h; y++) {
-        for (int x = 0; x < w; x++) {
-            const double dx = (x + 0.5) - cx;
-            const double dy = (y + 0.5) - cy;
-            const double dist = std::sqrt(dx * dx + dy * dy);
-            double cover = radius + 0.5 - dist;
-            if (cover < 0.0) cover = 0.0;
-            if (cover > 1.0) cover = 1.0;
-            const int a = (int)(cover * 255.0 + 0.5);
-            const int pr = (r * a + 127) / 255;
-            const int pg = (g * a + 127) / 255;
-            const int pb = (b * a + 127) / 255;
-            px[y * w + x] = ((uint32_t)a << 24) | ((uint32_t)pr << 16) |
-                            ((uint32_t)pg << 8) | (uint32_t)pb;
-        }
-    }
+    std::memset(bits, 0, (size_t)w * (size_t)h * sizeof(uint32_t));
+    PixelCanvas canvas{ static_cast<uint32_t*>(bits), w, h };
+    const bool rightDock = CapsuleDockEdge() == DockEdge::Right;
+    if (capsuleStyle_ == CapsuleStyle::Slim)
+        DrawCapsulePetEntry(canvas, rightDock, capsuleHover_);
+    else
+        DrawCapsuleOrbEntry(canvas, rightDock, capsuleHover_);
 
     HGDIOBJ old = SelectObject(mem, bmp);
     RECT wr{};

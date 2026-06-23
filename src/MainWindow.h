@@ -18,7 +18,7 @@ inline constexpr wchar_t kWindowClass[] = L"XTodoWindowClass";
 // 挂载形态：普通窗口 / 挂到桌面层 / 侧边吸附胶囊
 enum class MountMode { Normal, Desktop, Capsule };
 
-// 胶囊外观样式（仅 Capsule 形态）：细边长条 / 圆点
+// 胶囊外观样式（仅 Capsule 形态）：存档名沿用 slim / dot，视觉为睡眠魔方 / 魔方球
 enum class CapsuleStyle { Slim, Dot };
 
 // 胶囊吸附的屏幕竖边
@@ -45,7 +45,7 @@ private:
     bool CreateDeviceResources();
     void DiscardDeviceResources();
     bool Render(); // 返回 false 表示设备丢失等，本帧未成功绘制
-    bool RenderDotCapsuleLayered(); // Dot 折叠态：per-pixel alpha 抗锯齿圆点
+    bool RenderCapsuleEntryLayered(); // 折叠态侧边入口：per-pixel alpha 固定色视觉
     void Resize(UINT w, UINT h);
 
     // —— 布局与命中 ——
@@ -247,8 +247,8 @@ private:
     bool        DockMonitorInfo(MONITORINFOEXW& mi) const;
     HMONITOR    FindMonitorByDevice(const std::string& device) const;
     void        CaptureCapsuleDockFromRect(const RECT& wr);
-    void        UpdateLayeredState();  // 按样式 / 折叠 / hover 维护 WS_EX_LAYERED 整窗 alpha
-    void        UpdateCapsuleRegion(); // 折叠态（Slim 圆角矩形 / Dot 椭圆）用 window region 定形并关 DWM 圆角 / 边框
+    void        UpdateLayeredState();  // 折叠入口维护 WS_EX_LAYERED per-pixel alpha
+    void        UpdateCapsuleRegion(); // 折叠入口压制 DWM 边框 / 阴影，展开态恢复普通窗口
 
     // —— 行为 ——
     bool Confirm(Str message, UINT icon);
@@ -366,7 +366,7 @@ private:
     bool      capsuleHover_    = false;  // 折叠胶囊：鼠标悬停视觉提示
     bool      menuOpen_        = false;  // 弹出菜单存活期间：抑制 WM_MOUSELEAVE 误触收缩
     bool      calendarSyncing_ = false;  // 同步日历编辑框文本时抑制 EN_CHANGE 写回
-    int       layeredMode_     = 0;      // 0=none, 1=constant alpha, 2=per-pixel alpha
+    int       layeredMode_     = 0;      // 0=none, 2=per-pixel alpha folded entry
     POINT     capsulePressClient_{};     // 按下点（客户坐标，拖动时窗口跟随）
     POINT     capsulePressScreen_{};     // 按下点（屏幕坐标，阈值判定）
     RECT      animFrom_{};

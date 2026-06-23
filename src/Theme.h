@@ -44,10 +44,11 @@ constexpr float kResizeEdge = 8.0f;  // 缩放命中边缘宽度
 constexpr float kFooterH    = 0.0f;  // 固定底栏高度；新增入口已移入内容区加号行
 constexpr float kSectionH   = 26.0f; // 已完成折叠条高度
 
-// 胶囊折叠态尺寸（仅 Capsule 形态使用）；半透明度移入 CapsuleSet::slimAlpha
-constexpr float kCapsuleSlimW = 18.0f; // 细边胶囊折叠宽
-constexpr float kCapsuleSlimH = 96.0f; // 细边胶囊折叠高
-constexpr float kCapsuleDot   = 20.0f; // 圆点胶囊直径（折叠为正方）
+// 胶囊折叠态入口尺寸（仅 Capsule 形态使用）。存档仍使用 slim/dot 两个样式名。
+constexpr float kCapsulePetW = 76.0f;  // slim 样式：睡眠魔方宠物入口宽
+constexpr float kCapsulePetH = 128.0f; // slim 样式：睡眠魔方宠物入口高
+constexpr float kCapsuleOrbW = 70.0f;  // dot 样式：魔方球入口宽
+constexpr float kCapsuleOrbH = 120.0f; // dot 样式：魔方球入口高
 
 constexpr wchar_t kFontFamily[] = L"Microsoft YaHei UI"; // 含中英文字形
 
@@ -101,16 +102,16 @@ struct ColorSet {
 };
 
 struct CapsuleSet {
-    uint32_t slimPaper;      // 细边胶囊背景
-    uint32_t slimEdge;       // 细边胶囊边框
-    uint32_t slimText;       // 细边胶囊数字
-    uint32_t dotActive;      // 圆点：有未完成项
-    uint32_t dotIdle;        // 圆点：全部完成
-    uint32_t dotEdge;        // 圆点边框
-    uint32_t dotActiveHover; // 圆点 hover：有未完成项
-    uint32_t dotIdleHover;   // 圆点 hover：全部完成
-    uint32_t dotEdgeHover;   // 圆点边框 hover
-    float    slimAlpha;      // 细边折叠静止不透明度（0.2 .. 1.0）
+    uint32_t slimPaper;      // 主题格式保留字段；当前侧边入口不消费
+    uint32_t slimEdge;       // 主题格式保留字段；当前侧边入口不消费
+    uint32_t slimText;       // 主题格式保留字段；当前侧边入口不消费
+    uint32_t dotActive;      // 主题格式保留字段；当前侧边入口不消费
+    uint32_t dotIdle;        // 主题格式保留字段；当前侧边入口不消费
+    uint32_t dotEdge;        // 主题格式保留字段；当前侧边入口不消费
+    uint32_t dotActiveHover; // 主题格式保留字段；当前侧边入口不消费
+    uint32_t dotIdleHover;   // 主题格式保留字段；当前侧边入口不消费
+    uint32_t dotEdgeHover;   // 主题格式保留字段；当前侧边入口不消费
+    float    slimAlpha;      // 主题格式保留字段；当前侧边入口不消费
 };
 
 struct TraySet {

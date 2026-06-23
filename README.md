@@ -67,7 +67,7 @@ Open [Releases](https://github.com/xwysyy/X-TODO/releases), download `x-todo.exe
 
 ## Themes
 
-Five built-in themes: Paper, Mint, Sky, Rose, and Sand. Right-click the tray icon or open the title-bar menu and pick one under "Theme". Choose "Follow system" to track the Windows light/dark mode automatically. Switching a theme recolors the main window, the side capsule, menus, the confirm dialog, the Settings window, the theme manager, and the inline editor. The tray keeps the app icon fixed.
+Five built-in themes: Paper, Mint, Sky, Rose, and Sand. Right-click the tray icon or open the title-bar menu and pick one under "Theme". Choose "Follow system" to track the Windows light/dark mode automatically. Switching a theme recolors the main window, menus, the confirm dialog, the Settings window, the theme manager, and the inline editor. The folded side entry and tray keep fixed app colors.
 
 ### Custom themes
 
@@ -85,7 +85,7 @@ Drop a `.xtheme` file into `%APPDATA%\x-todo\themes\` and click "Reload" in the 
 }
 ```
 
-Colors are `#rrggbb`. The full field set (21 in `colors`, 10 in `capsule`, 4 in `tray`) is large; "Export current theme" in the theme manager writes a ready-to-edit template.
+Colors are `#rrggbb`. The full field set (21 in `colors`, 10 in `capsule`, 4 in `tray`) is large; "Export current theme" in the theme manager writes a ready-to-edit template. The folded side entry uses fixed app colors; `capsule` remains in the theme format.
 
 ## Build
 

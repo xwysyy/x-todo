@@ -12,7 +12,7 @@ and persistence behavior from the normal window.
 
 ### The collapsed and expanded capsule are two different windows in one HWND
 
-Symptom: resizing the collapsed pill (the slim bar or the dot) was either
+Symptom: resizing the collapsed entry (the sleeping cube or the puzzle orb) was either
 impossible or produced a deformed shape, and clicks on the pill behaved
 inconsistently with clicks on the expanded note.
 
@@ -25,12 +25,10 @@ window must also keep its shape. `OnNcHitTest` in `src/MainWindowView.cpp`
 returns `HTCLIENT` for `capsuleShrunk() || animActive_`, short-circuiting
 before any resize-edge math, so the system never enters a sizing loop on the
 pill. The expanded note falls through to the normal resize-edge and
-`HTCAPTION` logic and is fully resizable. The collapsed Dot style is given an
-elliptical window region by `UpdateCapsuleRegion` (`src/MainWindow.cpp`,
-`CreateEllipticRgn` when `dotShrunk`); the Slim style keeps a rectangular
-window and relies on DWM rounded corners instead of a region. Both collapsed
-styles suppress the DWM border line, and `UpdateCapsuleRegion` clears the
-region back to rectangular for every other state.
+`HTCAPTION` logic and is fully resizable. The collapsed entry is drawn with
+per-pixel alpha and fixed product colors, so `UpdateCapsuleRegion`
+(`src/MainWindow.cpp`) suppresses DWM border and shadow while folded and clears
+back to a rectangular ordinary window for every other state.
 
 Rule: collapsed or animating means fixed shape and `HTCLIENT`; expanded
 means resizable. Anything that reads or writes capsule shape, hit-testing,

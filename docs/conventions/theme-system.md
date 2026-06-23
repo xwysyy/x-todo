@@ -6,9 +6,9 @@ runtime contracts, not the implementation plan that created them.
 ## Runtime Boundary
 
 `Theme::ThemeVisual` is the rendering color contract. Main window paint,
-capsule paint, dialogs, prompts, popup menus, the theme manager, and native
-child-control coloring must read the active `ThemeVisual` or an explicit
-snapshot captured when the popup opens.
+dialogs, prompts, popup menus, the theme manager, and native child-control
+coloring must read the active `ThemeVisual` or an explicit snapshot captured
+when the popup opens.
 
 Direct2D and DirectWrite self-drawn surfaces use `Theme::D2DColor`.
 `Theme::GdiColor` is only for remaining Win32/GDI boundaries such as native
@@ -98,9 +98,14 @@ through `WM_CTLCOLOREDIT`. Caret color, selection color, and IME candidate UI
 are controlled by Windows. Dark-theme work is incomplete until those states
 are checked on Windows with real input.
 
-Side-capsule rendering consumes `theme_.capsule`. Slim folded opacity comes
-from `theme_.capsule.slimAlpha`; Dot folded state uses Dot capsule colors and
-the existing per-pixel alpha path.
+The folded side entry uses fixed product colors and per-pixel alpha. Theme
+switching must not recolor the sleeping cube, puzzle orb, sticker colors, or
+their hover states. The persisted style names remain `slim` and `dot`, but the
+visible menu labels are Sleep cube and Puzzle orb.
+
+`ThemeVisual::capsule` remains part of the theme data shape and export format.
+Do not claim that folded side-entry rendering consumes it unless a current code
+path actually does.
 
 ## Tray Boundary
 
