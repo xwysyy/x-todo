@@ -2004,7 +2004,7 @@ RECT MainWindow::CapsuleTargetRect() const {
     if (DockMonitorInfo(mi)) wa = mi.rcWork;
     else SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
 
-    float cwF = Theme::kCapsulePetW, chF = Theme::kCapsulePetH; // 默认 Slim 睡眠魔方
+    float cwF = Theme::kCapsulePetW, chF = Theme::kCapsulePetH; // 默认 Slim 魔方
     switch (capsuleStyle_) {
         case CapsuleStyle::Dot: cwF = Theme::kCapsuleOrbW;  chF = Theme::kCapsuleOrbH;  break;
         case CapsuleStyle::Bar: cwF = Theme::kCapsuleSlimW; chF = Theme::kCapsuleSlimH; break;

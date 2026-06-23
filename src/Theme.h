@@ -44,11 +44,11 @@ constexpr float kResizeEdge = 8.0f;  // 缩放命中边缘宽度
 constexpr float kFooterH    = 0.0f;  // 固定底栏高度；新增入口已移入内容区加号行
 constexpr float kSectionH   = 26.0f; // 已完成折叠条高度
 
-// 胶囊折叠态入口尺寸（仅 Capsule 形态使用）。四种样式：睡眠魔方 / 魔方球（固定色装饰）+ 细边 / 圆点（受主题约束的状态入口）。
-constexpr float kCapsulePetW = 60.0f;  // slim 样式：睡眠魔方宠物入口宽
-constexpr float kCapsulePetH = 100.0f; // slim 样式：睡眠魔方宠物入口高
-constexpr float kCapsuleOrbW = 56.0f;  // dot 样式：魔方球入口宽
-constexpr float kCapsuleOrbH = 96.0f;  // dot 样式：魔方球入口高
+// 胶囊折叠态入口尺寸（仅 Capsule 形态使用）。四种样式：魔方 / 精灵球（固定色装饰）+ 细边 / 圆点（受主题约束的状态入口）。
+constexpr float kCapsulePetW = 60.0f;  // slim 样式：魔方宠物入口宽
+constexpr float kCapsulePetH = 100.0f; // slim 样式：魔方宠物入口高
+constexpr float kCapsuleOrbW = 56.0f;  // dot 样式：精灵球入口宽
+constexpr float kCapsuleOrbH = 96.0f;  // dot 样式：精灵球入口高
 constexpr float kCapsuleSlimW = 18.0f; // bar 样式：细边折叠宽
 constexpr float kCapsuleSlimH = 96.0f; // bar 样式：细边折叠高
 constexpr float kCapsuleDot   = 20.0f; // pip 样式：圆点直径（折叠为正方）

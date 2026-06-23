@@ -8,8 +8,8 @@ enum class Str {
     ModeNormal,   // 普通窗口
     ModeDesktop,  // 挂到桌面
     ModeCapsule,  // 侧边胶囊
-    StyleSlim,    // 胶囊样式：睡眠魔方（存档值 slim）
-    StyleDot,     // 胶囊样式：魔方球（存档值 dot）
+    StyleSlim,    // 胶囊样式：魔方（存档值 slim）
+    StyleDot,     // 胶囊样式：精灵球（存档值 dot）
     StyleBar,     // 胶囊样式：细边（存档值 bar）
     StylePip,     // 胶囊样式：圆点（存档值 pip）
     Settings,     // 设置入口 / 窗口标题

@@ -99,9 +99,9 @@ are controlled by Windows. Dark-theme work is incomplete until those states
 are checked on Windows with real input.
 
 The folded side entry uses fixed product colors and per-pixel alpha. Theme
-switching must not recolor the sleeping cube, puzzle orb, sticker colors, or
+switching must not recolor the cube, Poké Ball, sticker colors, or
 their hover states. The persisted style names remain `slim` and `dot`, but the
-visible menu labels are Sleep cube and Puzzle orb.
+visible menu labels are Cube and Poké Ball.
 
 `ThemeVisual::capsule` remains part of the theme data shape and export format.
 Do not claim that folded side-entry rendering consumes it unless a current code

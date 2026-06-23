@@ -12,7 +12,7 @@ and persistence behavior from the normal window.
 
 ### The collapsed and expanded capsule are two different windows in one HWND
 
-Symptom: resizing the collapsed entry (the sleeping cube or the puzzle orb) was either
+Symptom: resizing the collapsed entry (the cube or the Poké Ball) was either
 impossible or produced a deformed shape, and clicks on the pill behaved
 inconsistently with clicks on the expanded note.
 

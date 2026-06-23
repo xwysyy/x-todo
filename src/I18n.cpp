@@ -10,8 +10,8 @@ const wchar_t* T(Str key, Lang lang) {
         case Str::ModeNormal:    return zh ? L"普通窗口"        : L"Normal window";
         case Str::ModeDesktop:   return zh ? L"挂到桌面"        : L"On desktop";
         case Str::ModeCapsule:   return zh ? L"侧边胶囊"        : L"Side capsule";
-        case Str::StyleSlim:     return zh ? L"睡眠魔方"        : L"Sleep cube";
-        case Str::StyleDot:      return zh ? L"魔方球"          : L"Puzzle orb";
+        case Str::StyleSlim:     return zh ? L"魔方"            : L"Cube";
+        case Str::StyleDot:      return zh ? L"精灵球"          : L"Poké Ball";
         case Str::StyleBar:      return zh ? L"细边"            : L"Slim bar";
         case Str::StylePip:      return zh ? L"圆点"            : L"Dot";
         case Str::Settings:      return zh ? L"设置"            : L"Settings";

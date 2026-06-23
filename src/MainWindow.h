@@ -18,8 +18,8 @@ inline constexpr wchar_t kWindowClass[] = L"XTodoWindowClass";
 // 挂载形态：普通窗口 / 挂到桌面层 / 侧边吸附胶囊
 enum class MountMode { Normal, Desktop, Capsule };
 
-// 胶囊外观样式（仅 Capsule 形态）。存档名：Slim=slim(睡眠魔方) / Dot=dot(魔方球) /
-// Bar=bar(细边) / Pip=pip(圆点)。魔方两种为固定色装饰，细边/圆点受主题约束。
+// 胶囊外观样式（仅 Capsule 形态）。存档名：Slim=slim(魔方) / Dot=dot(精灵球) /
+// Bar=bar(细边) / Pip=pip(圆点)。魔方与精灵球为固定色装饰，细边/圆点受主题约束。
 enum class CapsuleStyle { Slim, Dot, Bar, Pip };
 
 // 胶囊吸附的屏幕竖边

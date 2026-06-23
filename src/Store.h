@@ -24,7 +24,7 @@ struct UiState {
     std::string lightThemeId = "paper";    // follow_system 浅色
     std::string darkThemeId  = "paper";    // follow_system 深色（已无深色内置主题）
     // 胶囊形态：外观样式 + 吸附边 + 沿边比例 + 所在显示器
-    std::string capsuleStyle    = "slim";  // slim(睡眠魔方) | dot(魔方球) | bar(细边) | pip(圆点)
+    std::string capsuleStyle    = "slim";  // slim(魔方) | dot(精灵球) | bar(细边) | pip(圆点)
     std::string capsuleDockEdge = "right"; // left | right
     double      capsuleDockT    = 0.5;     // 0..1，沿吸附边的归一化纵向位置
     std::string capsuleMonitor  = "";      // 显示器 szDevice（UTF-8），丢失时回退就近
