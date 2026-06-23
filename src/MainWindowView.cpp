@@ -246,14 +246,6 @@ void StrokeRoundRectDesign(const PixelCanvas& c, bool rightDock, double designW,
     StrokeRoundRectPixels(c, x1, t * scale, x2, b * scale, radius * scale, stroke * scale, rgb, alpha);
 }
 
-void FillLineDesign(const PixelCanvas& c, bool rightDock, double designW, double scale,
-                    double x1, double y1, double x2, double y2, double width,
-                    uint32_t rgb, int alpha) {
-    FillLinePixels(c, EntryX(rightDock, designW, x1) * scale, y1 * scale,
-                   EntryX(rightDock, designW, x2) * scale, y2 * scale,
-                   width * scale, rgb, alpha);
-}
-
 void FillRotatedRoundRectDesign(const PixelCanvas& c, bool rightDock, double designW, double scale,
                                 double cx, double cy, double w, double h, double radius,
                                 double degrees, uint32_t rgb, int alpha) {
@@ -288,34 +280,25 @@ void DrawCapsulePetEntry(const PixelCanvas& c, bool rightDock, double t) {
     constexpr double designW = 76.0;
     constexpr double designH = 128.0;
     const double scale = c.h / designH;
-    const double e = 1.0 - (1.0 - t) * (1.0 - t); // ease-out：睡(0) → 醒(1)
-    const double cubeLeft = 26.0 - 10.0 * e;       // 醒来向外探出
-    const double cubeAngle = -8.0 + 13.0 * e;      // 歪头打盹 → 转正抬头
-    const double cubeCx = cubeLeft + 20.0;
-    const double cubeCy = 62.0;
+    const double e = 1.0 - (1.0 - t) * (1.0 - t);  // ease-out
+    const double cubeCx = 72.0 - 20.0 * e;          // 半探头贴边 → hover 探入
+    const double cubeCy = 64.0;
+    const double cubeAngle = -16.0 + 16.0 * e;      // 静止倾斜 → hover 转正
 
-    // 趴睡的小台座（静止参照）
-    FillRoundRectDesign(c, rightDock, designW, scale, 44.0, 88.0, 76.0, 102.0,
-                        12.0, 0x000000, 28);
-    FillRoundRectDesign(c, rightDock, designW, scale, 44.0, 88.0, 76.0, 102.0,
-                        12.0, 0xFFFFFF, 118);
-    StrokeRoundRectDesign(c, rightDock, designW, scale, 44.0, 88.0, 76.0, 102.0,
-                          12.0, 1.0, 0x302B25, 34);
-
-    // 魔方体（含投影），留出深色边框不让贴纸铺满
-    FillRotatedRoundRectDesign(c, rightDock, designW, scale, cubeCx + 1.5, cubeCy + 5.0,
-                               40.0, 40.0, 11.0, cubeAngle, 0x000000, 40);
+    // 纯魔方体（含投影），留深色边框不让贴纸铺满
+    FillRotatedRoundRectDesign(c, rightDock, designW, scale, cubeCx + 1.5, cubeCy + 4.0,
+                               44.0, 44.0, 12.0, cubeAngle, 0x000000, 38);
     FillRotatedRoundRectDesign(c, rightDock, designW, scale, cubeCx, cubeCy,
-                               40.0, 40.0, 11.0, cubeAngle, 0x26272B, 255);
+                               44.0, 44.0, 12.0, cubeAngle, 0x26272B, 255);
 
     constexpr uint32_t colors[9] = {
         0x1197D5, 0xF6C12A, 0x40BD54,
         0xEB513F, 0xFFF7E8, 0x1197D5,
         0xF27C28, 0x40BD54, 0xEB513F,
     };
-    const double sticker = 9.0;
+    const double sticker = 10.0;
     const double gap = 2.5;
-    const double start = -20.0 + 4.0 + sticker * 0.5;
+    const double start = -(sticker + gap); // 3×3 居中于 44 魔方
     for (int row = 0; row < 3; ++row) {
         for (int col = 0; col < 3; ++col) {
             DrawPetCubeSticker(c, rightDock, designW, scale, cubeCx, cubeCy, cubeAngle,
@@ -324,34 +307,15 @@ void DrawCapsulePetEntry(const PixelCanvas& c, bool rightDock, double t) {
                                sticker, colors[row * 3 + col]);
         }
     }
-
-    // 眼睛：睡=闭（扁眼缝），醒=睁（圆点）
-    const double eyeH = 1.6 + 3.4 * e;
-    const double eyeR = eyeH * 0.5;
-    double eyeX = cubeCx;
-    double eyeY = cubeCy;
-    RotateDesignPoint(cubeCx, cubeCy, -8.5, -1.5, cubeAngle, eyeX, eyeY);
-    FillRotatedRoundRectDesign(c, rightDock, designW, scale, eyeX, eyeY,
-                               5.0, eyeH, eyeR, cubeAngle, 0x1B1D21, 250);
-    RotateDesignPoint(cubeCx, cubeCy, 6.5, -1.5, cubeAngle, eyeX, eyeY);
-    FillRotatedRoundRectDesign(c, rightDock, designW, scale, eyeX, eyeY,
-                               5.0, eyeH, eyeR, cubeAngle, 0x1B1D21, 250);
-
-    // Z：睡眠时清晰，醒来淡出并上飘
-    const int zAlpha = (int)(178.0 * (1.0 - e) + 0.5);
-    if (zAlpha > 0) {
-        const double zy = -6.0 * e;
-        FillLineDesign(c, rightDock, designW, scale, 54.0, 25.0 + zy, 62.0, 25.0 + zy, 2.0, 0x2F77D4, zAlpha);
-        FillLineDesign(c, rightDock, designW, scale, 62.0, 25.0 + zy, 54.0, 34.0 + zy, 2.0, 0x2F77D4, zAlpha);
-        FillLineDesign(c, rightDock, designW, scale, 54.0, 34.0 + zy, 62.0, 34.0 + zy, 2.0, 0x2F77D4, zAlpha);
-    }
 }
 
-void FillOrbBody(const PixelCanvas& c, double cx, double cy, double r) {
+void FillOrbBody(const PixelCanvas& c, double cx, double cy, double r, double angleRad) {
     const int x0 = (int)std::floor(cx - r - 1.0);
     const int y0 = (int)std::floor(cy - r - 1.0);
     const int x1 = (int)std::ceil(cx + r + 1.0);
     const int y1 = (int)std::ceil(cy + r + 1.0);
+    const double co = std::cos(angleRad);
+    const double si = std::sin(angleRad);
     for (int y = y0; y <= y1; ++y) {
         for (int x = x0; x <= x1; ++x) {
             const double dx = x + 0.5 - cx;
@@ -359,9 +323,10 @@ void FillOrbBody(const PixelCanvas& c, double cx, double cy, double r) {
             const double dist = std::sqrt(dx * dx + dy * dy);
             const double cover = Clamp01(0.5 - (dist - r));
             if (cover <= 0.0) continue;
-            const bool top = (y + 0.5) < cy;
-            const uint32_t rgb = top ? 0xFFFFFF : 0x2F77D4; // 上半透明白 / 下半主题蓝
-            const int alpha = top ? 205 : 150;              // 拉开上下分层对比
+            const double ly = -si * dx + co * dy;           // 旋转到球本地纵轴，分界随倾斜
+            const bool top = ly < 0.0;
+            const uint32_t rgb = top ? 0x2F77D4 : 0xFFFFFF; // 上半主题蓝 / 下半白
+            const int alpha = top ? 205 : 215;
             BlendPixel(c, x, y, rgb, (int)(alpha * cover + 0.5));
         }
     }
@@ -372,50 +337,29 @@ void DrawCapsuleOrbEntry(const PixelCanvas& c, bool rightDock, double t) {
     constexpr double designH = 120.0;
     const double scale = c.h / designH;
     const double e = 1.0 - (1.0 - t) * (1.0 - t); // ease-out
-    const double orbLeft = 30.0 - 26.0 * e;        // 半露 → 滑出
-    const double orbTop = 31.0;
-    const double grow = 1.0 + 0.05 * e;            // hover 轻微放大
-    const double r = 29.0 * scale * grow;
-    const double knob = 8.0 * scale * grow;
-    const double cx = EntryX(rightDock, designW, orbLeft + 29.0) * scale;
-    const double cy = (orbTop + 29.0) * scale;
+    const double pi = 3.14159265358979323846;
+    const double grow = 1.0 + 0.05 * e;            // hover 微放大
+    const double r = 21.0 * scale * grow;
+    const double knob = 7.0 * scale * grow;
+    const double cxDesign = 66.0 - 20.0 * e;       // 半探头贴边 → hover 探入
+    const double cx = EntryX(rightDock, designW, cxDesign) * scale;
+    const double cy = 60.0 * scale;
+    const double angleDeg = (rightDock ? -1.0 : 1.0) * (16.0 - 8.0 * e); // 静止倾斜 → hover 扶正
+    const double angleRad = angleDeg * pi / 180.0;
+    const double ca = std::cos(angleRad);
+    const double sa = std::sin(angleRad);
 
-    // 投影 → 球体（上白下蓝）→ 描边
+    // 投影 → 球体（上蓝下白，分界随倾斜）→ 描边
     FillEllipsePixels(c, cx + (rightDock ? 2.0 : -2.0) * scale, cy + 6.0 * scale,
                       r * 0.92, r * 0.80, 0x000000, 38);
-    FillOrbBody(c, cx, cy, r);
-    StrokeEllipsePixels(c, cx, cy, r - 0.5 * scale, r - 0.5 * scale, 1.0 * scale, 0x302B25, 34);
+    FillOrbBody(c, cx, cy, r, angleRad);
+    StrokeEllipsePixels(c, cx, cy, r - 0.5 * scale, r - 0.5 * scale, 1.0 * scale, 0x302B25, 40);
 
-    // 左上魔方贴纸
-    const double stickerSize = 8.5;
-    const double gap = 2.0;
-    const double gridLeft = orbLeft + 7.0;
-    const double gridTop = orbTop + 7.0;
-    const double angle = rightDock ? -16.0 : 16.0;
-    constexpr uint32_t colors[9] = {
-        0xF6C12A, 0x1197D5, 0x40BD54,
-        0xEB513F, 0xFFF7E8, 0x40BD54,
-        0xF27C28, 0x1197D5, 0xEB513F,
-    };
-    const double gridCx = gridLeft + (stickerSize * 3.0 + gap * 2.0) * 0.5;
-    const double gridCy = gridTop + (stickerSize * 3.0 + gap * 2.0) * 0.5;
-    for (int row = 0; row < 3; ++row) {
-        for (int col = 0; col < 3; ++col) {
-            const double localX = -(stickerSize + gap) + col * (stickerSize + gap);
-            const double localY = -(stickerSize + gap) + row * (stickerSize + gap);
-            double sx = gridCx;
-            double sy = gridCy;
-            RotateDesignPoint(gridCx, gridCy, localX, localY, angle, sx, sy);
-            FillRotatedRoundRectDesign(c, rightDock, designW, scale, sx, sy,
-                                       stickerSize, stickerSize, 2.0, angle,
-                                       colors[row * 3 + col], 232);
-        }
-    }
-
-    // 正中深色缝 + 中心圆钮（最上层，pokeball 机关）
-    FillLinePixels(c, cx - r * 0.72, cy, cx + r * 0.72, cy, 3.5 * scale, 0x272623, 46);
+    // 倾斜中缝 + 中心圆钮（pokeball 机关）
+    FillLinePixels(c, cx - r * 0.72 * ca, cy - r * 0.72 * sa,
+                   cx + r * 0.72 * ca, cy + r * 0.72 * sa, 3.5 * scale, 0x272623, 70);
     FillEllipsePixels(c, cx, cy, knob, knob, 0xFFFAF0, 235);
-    StrokeEllipsePixels(c, cx, cy, knob, knob, 3.0 * scale, 0x272623, 40);
+    StrokeEllipsePixels(c, cx, cy, knob, knob, 2.5 * scale, 0x272623, 210);
 }
 
 // bar 样式：受主题约束的半透明细边长条；hover 时转为不透明。
