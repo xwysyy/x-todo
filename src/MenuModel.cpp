@@ -26,6 +26,10 @@ void AppendModeAndAppItems(std::vector<Item>& items, const State& state, bool in
                           inCapsule && state.capsuleStyle == CapsuleStyle::Slim, false, true, 1 });
     items.push_back(Item{ kCmdStyleDot, T(Str::StyleDot, state.lang), false,
                           inCapsule && state.capsuleStyle == CapsuleStyle::Dot, false, true, 1 });
+    items.push_back(Item{ kCmdStyleBar, T(Str::StyleBar, state.lang), false,
+                          inCapsule && state.capsuleStyle == CapsuleStyle::Bar, false, true, 1 });
+    items.push_back(Item{ kCmdStylePip, T(Str::StylePip, state.lang), false,
+                          inCapsule && state.capsuleStyle == CapsuleStyle::Pip, false, true, 1 });
     items.push_back(Separator());
     items.push_back(Item{ kCmdSettings, T(Str::Settings, state.lang) });
     items.push_back(Separator());

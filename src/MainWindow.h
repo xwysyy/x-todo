@@ -18,8 +18,9 @@ inline constexpr wchar_t kWindowClass[] = L"XTodoWindowClass";
 // 挂载形态：普通窗口 / 挂到桌面层 / 侧边吸附胶囊
 enum class MountMode { Normal, Desktop, Capsule };
 
-// 胶囊外观样式（仅 Capsule 形态）：存档名沿用 slim / dot，视觉为睡眠魔方 / 魔方球
-enum class CapsuleStyle { Slim, Dot };
+// 胶囊外观样式（仅 Capsule 形态）。存档名：Slim=slim(睡眠魔方) / Dot=dot(魔方球) /
+// Bar=bar(细边) / Pip=pip(圆点)。魔方两种为固定色装饰，细边/圆点受主题约束。
+enum class CapsuleStyle { Slim, Dot, Bar, Pip };
 
 // 胶囊吸附的屏幕竖边
 enum class DockEdge { Left, Right };
@@ -228,6 +229,7 @@ private:
     void        SetCapsuleStyle(CapsuleStyle s);
     void        StartCapsuleAnim(bool expand);
     void        OnAnimTick();
+    void        OnHoverTick();           // 折叠入口 hover 缓动推进
     void        MaybeCollapseCapsule(); // 编辑结束后若鼠标已在窗口外则收回胶囊
     RECT        CapsuleTargetRect() const;  // 折叠贴边矩形（屏幕坐标）
     RECT        ExpandedTargetRect() const; // 胶囊展开后的矩形（屏幕坐标）
@@ -363,7 +365,8 @@ private:
     bool      animActive_     = false;
     bool      capsulePressing_ = false;  // 折叠胶囊：鼠标按下中（待区分点击 / 拖动）
     bool      capsuleDragging_ = false;  // 折叠胶囊：已越过阈值进入拖动
-    bool      capsuleHover_    = false;  // 折叠胶囊：鼠标悬停视觉提示
+    bool      capsuleHover_    = false;  // 折叠胶囊：鼠标悬停目标方向（true=醒/探出）
+    double    capsuleHoverT_   = 0.0;    // 折叠入口 hover 缓动进度 0..1（仅过渡期间重绘）
     bool      menuOpen_        = false;  // 弹出菜单存活期间：抑制 WM_MOUSELEAVE 误触收缩
     bool      calendarSyncing_ = false;  // 同步日历编辑框文本时抑制 EN_CHANGE 写回
     int       layeredMode_     = 0;      // 0=none, 2=per-pixel alpha folded entry
@@ -374,6 +377,8 @@ private:
     int       animStep_       = 0;
     static constexpr UINT_PTR kAnimTimerId = 2;
     static constexpr int      kAnimSteps   = 16; // 滑动动画帧数（配合 15ms/帧，放慢更柔和）
+    static constexpr UINT_PTR kHoverTimerId = 3;       // 折叠入口 hover 缓动（探出/醒 ←→ 缩回/睡）
+    static constexpr double   kHoverStep   = 1.0 / 12.0; // 每帧推进（15ms/帧，约 180ms 到位）
 
     static constexpr UINT_PTR kSaveTimerId = 1;
     static constexpr UINT_PTR kCollapseTimerId = 4;     // 展开胶囊：鼠标离开后的折叠宽限定时器

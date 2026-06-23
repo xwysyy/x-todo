@@ -12,6 +12,8 @@ const wchar_t* T(Str key, Lang lang) {
         case Str::ModeCapsule:   return zh ? L"侧边胶囊"        : L"Side capsule";
         case Str::StyleSlim:     return zh ? L"睡眠魔方"        : L"Sleep cube";
         case Str::StyleDot:      return zh ? L"魔方球"          : L"Puzzle orb";
+        case Str::StyleBar:      return zh ? L"细边"            : L"Slim bar";
+        case Str::StylePip:      return zh ? L"圆点"            : L"Dot";
         case Str::Settings:      return zh ? L"设置"            : L"Settings";
         case Str::SettingsGeneral:return zh ? L"通用"           : L"General";
         case Str::SettingsDataBackup:return zh ? L"数据备份"    : L"Data backup";

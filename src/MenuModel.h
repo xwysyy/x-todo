@@ -17,6 +17,8 @@ inline constexpr Command kCmdModeNormal = 10;
 inline constexpr Command kCmdModeDesktop = 11;
 inline constexpr Command kCmdStyleSlim = 30;
 inline constexpr Command kCmdStyleDot = 31;
+inline constexpr Command kCmdStyleBar = 32;
+inline constexpr Command kCmdStylePip = 33;
 
 inline constexpr Command kCmdThemeFollowSystem = 1000;
 inline constexpr Command kCmdThemeBuiltinBase = 1100;
@@ -35,6 +37,8 @@ enum class MountMode {
 enum class CapsuleStyle {
     Slim,
     Dot,
+    Bar,
+    Pip,
 };
 
 struct Item {

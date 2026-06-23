@@ -153,6 +153,23 @@ void UnicodeTitlesAndItemsRoundTripWithoutEscaping() {
     AssertInvariants(loaded);
 }
 
+void CapsuleStyleBarAndPipRoundTrip() {
+    for (const char* style : {"bar", "pip"}) {
+        TodoModel model;
+        CalendarModel calendar;
+        WindowGeometry geom;
+        UiState ui;
+        ui.capsuleStyle = style;
+        const std::string text = StoreFormat::Serialize(model, calendar, geom, ui);
+        TodoModel loaded;
+        CalendarModel loadedCalendar;
+        WindowGeometry loadedGeom;
+        UiState loadedUi;
+        EXPECT_TRUE(StoreFormat::Parse(text, loaded, loadedCalendar, loadedGeom, loadedUi));
+        EXPECT_EQ(loadedUi.capsuleStyle, std::string(style));
+    }
+}
+
 void UiParsingValidatesEnumsAndClampsRanges() {
     const std::string text = R"({
       "ui": {
@@ -334,6 +351,7 @@ void MalformedFieldsFallBackToDefaultsWithoutThrowing() {
 const TestCase kTests[] = {
     {"SerializeRoundTripPreservesMultiListModelUiAndGeometry", SerializeRoundTripPreservesMultiListModelUiAndGeometry},
     {"UnicodeTitlesAndItemsRoundTripWithoutEscaping", UnicodeTitlesAndItemsRoundTripWithoutEscaping},
+    {"CapsuleStyleBarAndPipRoundTrip", CapsuleStyleBarAndPipRoundTrip},
     {"UiParsingValidatesEnumsAndClampsRanges", UiParsingValidatesEnumsAndClampsRanges},
     {"MissingCurrentListFallsBackAndDockTClamps", MissingCurrentListFallsBackAndDockTClamps},
     {"EmptyAndWhitespaceLeaveSafeDefaults", EmptyAndWhitespaceLeaveSafeDefaults},

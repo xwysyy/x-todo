@@ -149,7 +149,7 @@ bool Parse(const std::string& utf8, TodoModel& model, CalendarModel& calendar,
         { std::string v = GetUtf8(u, "darkThemeId");  if (IsValidThemeId(v)) ui.darkThemeId = v; }
         {
             std::string v = GetUtf8(u, "capsuleStyle");
-            if (v == "slim" || v == "dot") ui.capsuleStyle = v;
+            if (v == "slim" || v == "dot" || v == "bar" || v == "pip") ui.capsuleStyle = v;
         }
         {
             std::string v = GetUtf8(u, "capsuleDockEdge");

@@ -11,7 +11,7 @@ namespace {
 
 const Str kAllStrings[] = {
     Str::Show, Str::ModeNormal, Str::ModeDesktop, Str::ModeCapsule,
-    Str::StyleSlim, Str::StyleDot, Str::Settings, Str::SettingsGeneral,
+    Str::StyleSlim, Str::StyleDot, Str::StyleBar, Str::StylePip, Str::Settings, Str::SettingsGeneral,
     Str::SettingsDataBackup, Str::SettingsClose, Str::SettingOn, Str::SettingOff,
     Str::Language, Str::Autostart,
     Str::Exit, Str::Calendar, Str::CalendarToday,

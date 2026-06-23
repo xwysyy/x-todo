@@ -1081,7 +1081,12 @@ GuiMenu::MountMode ToMenuMountMode(MountMode mode) {
 }
 
 GuiMenu::CapsuleStyle ToMenuCapsuleStyle(CapsuleStyle style) {
-    return style == CapsuleStyle::Dot ? GuiMenu::CapsuleStyle::Dot : GuiMenu::CapsuleStyle::Slim;
+    switch (style) {
+        case CapsuleStyle::Dot: return GuiMenu::CapsuleStyle::Dot;
+        case CapsuleStyle::Bar: return GuiMenu::CapsuleStyle::Bar;
+        case CapsuleStyle::Pip: return GuiMenu::CapsuleStyle::Pip;
+        default:                return GuiMenu::CapsuleStyle::Slim;
+    }
 }
 
 PopupMenuItem ToPopupMenuItem(const GuiMenu::Item& item) {
@@ -1164,7 +1169,10 @@ bool MainWindow::Create() {
           : SystemDefaultLang();
     activeView_ = ui_.activeView == "calendar" ? MainView::Calendar : MainView::Lists;
     EnsureCalendarDay();
-    capsuleStyle_ = ui_.capsuleStyle == "dot" ? CapsuleStyle::Dot : CapsuleStyle::Slim;
+    capsuleStyle_ = ui_.capsuleStyle == "dot" ? CapsuleStyle::Dot
+                  : ui_.capsuleStyle == "bar" ? CapsuleStyle::Bar
+                  : ui_.capsuleStyle == "pip" ? CapsuleStyle::Pip
+                  : CapsuleStyle::Slim;
     mountMode_ = ui_.mountMode == "desktop" ? MountMode::Desktop
                : ui_.mountMode == "capsule" ? MountMode::Capsule
                : MountMode::Normal;
@@ -1438,8 +1446,8 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
                 KillTimer(hwnd_, kCollapseTimerId);
         }
         if (capsuleShrunk() && !capsulePressing_ && !capsuleHover_) {
-            capsuleHover_ = true; // 折叠胶囊：鼠标进入仅视觉提示，不展开
-            UpdateLayeredState();
+            capsuleHover_ = true; // 折叠入口：鼠标进入 → 缓动醒来探出（不展开）
+            SetTimer(hwnd_, kHoverTimerId, 15, nullptr);
             InvalidateRect(hwnd_, nullptr, FALSE);
         }
         OnMouseMove((float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp), (wp & MK_LBUTTON) != 0);
@@ -1448,9 +1456,9 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_MOUSELEAVE:
         OnMouseLeave();
-        if (capsuleHover_) { // 折叠胶囊：离开则取消视觉提示
+        if (capsuleHover_) { // 折叠入口：离开 → 缓动缩回睡下
             capsuleHover_ = false;
-            UpdateLayeredState();
+            SetTimer(hwnd_, kHoverTimerId, 15, nullptr);
             InvalidateRect(hwnd_, nullptr, FALSE);
         }
         if (mountMode_ == MountMode::Capsule && capsuleExpanded_ && !animActive_ &&
@@ -1502,6 +1510,8 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
             SaveNow();
         } else if (wp == kAnimTimerId) {
             OnAnimTick();
+        } else if (wp == kHoverTimerId) {
+            OnHoverTick();
         } else if (wp == kCollapseTimerId) {
             KillTimer(hwnd_, kCollapseTimerId);
             if (mountMode_ == MountMode::Capsule && capsuleExpanded_ && !animActive_ &&
@@ -1703,6 +1713,12 @@ void MainWindow::HandleMenuCommand(UINT cmd) {
                  if (mountMode_ != MountMode::Capsule) SetMountMode(MountMode::Capsule); break;
         case GuiMenu::kCmdStyleDot:
                  SetCapsuleStyle(CapsuleStyle::Dot);
+                 if (mountMode_ != MountMode::Capsule) SetMountMode(MountMode::Capsule); break;
+        case GuiMenu::kCmdStyleBar:
+                 SetCapsuleStyle(CapsuleStyle::Bar);
+                 if (mountMode_ != MountMode::Capsule) SetMountMode(MountMode::Capsule); break;
+        case GuiMenu::kCmdStylePip:
+                 SetCapsuleStyle(CapsuleStyle::Pip);
                  if (mountMode_ != MountMode::Capsule) SetMountMode(MountMode::Capsule); break;
         default:
             // 主题命令分区（1000..1999）
@@ -1958,6 +1974,9 @@ void MainWindow::ApplyMountMode() {
     KillTimer(hwnd_, kAnimTimerId);
     animActive_ = false;
     capsuleExpanded_ = false;
+    KillTimer(hwnd_, kHoverTimerId); // 形态切换：清折叠入口 hover 缓动，与其他 reset 点一致
+    capsuleHover_ = false;
+    capsuleHoverT_ = 0.0;
 
     if (mountMode_ == MountMode::Desktop) {
         // 沉到最底层贴桌面：不挡工作窗口、看桌面时可见，且不依赖脆弱又挑版本的 WorkerW 嵌入
@@ -1985,8 +2004,14 @@ RECT MainWindow::CapsuleTargetRect() const {
     if (DockMonitorInfo(mi)) wa = mi.rcWork;
     else SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
 
-    int cw = (int)S(capsuleStyle_ == CapsuleStyle::Dot ? Theme::kCapsuleOrbW : Theme::kCapsulePetW);
-    int ch = (int)S(capsuleStyle_ == CapsuleStyle::Dot ? Theme::kCapsuleOrbH : Theme::kCapsulePetH);
+    float cwF = Theme::kCapsulePetW, chF = Theme::kCapsulePetH; // 默认 Slim 睡眠魔方
+    switch (capsuleStyle_) {
+        case CapsuleStyle::Dot: cwF = Theme::kCapsuleOrbW;  chF = Theme::kCapsuleOrbH;  break;
+        case CapsuleStyle::Bar: cwF = Theme::kCapsuleSlimW; chF = Theme::kCapsuleSlimH; break;
+        case CapsuleStyle::Pip: cwF = Theme::kCapsuleDot;   chF = Theme::kCapsuleDot;   break;
+        default: break;
+    }
+    int cw = (int)S(cwF), ch = (int)S(chF);
     int workW = wa.right - wa.left, workH = wa.bottom - wa.top;
     if (workW > 0 && cw > workW) cw = workW; // 防胶囊大于工作区致 ClampInt 边界反转
     if (workH > 0 && ch > workH) ch = workH;
@@ -2072,7 +2097,13 @@ void MainWindow::CaptureCapsuleDockFromRect(const RECT& wr) {
 void MainWindow::SetCapsuleStyle(CapsuleStyle s) {
     if (s == capsuleStyle_) return;
     capsuleStyle_ = s;
-    ui_.capsuleStyle = (s == CapsuleStyle::Dot) ? "dot" : "slim";
+    ui_.capsuleStyle = s == CapsuleStyle::Dot ? "dot"
+                     : s == CapsuleStyle::Bar ? "bar"
+                     : s == CapsuleStyle::Pip ? "pip"
+                     : "slim";
+    capsuleHover_ = false;          // 切样式：hover 缓动归零，新形态从静止画起
+    capsuleHoverT_ = 0.0;
+    KillTimer(hwnd_, kHoverTimerId);
     if (mountMode_ == MountMode::Capsule) {
         if (animActive_) {                 // (R1-F005) 动画中切样式：先定格到终态，避免 region 落在旧样式尺寸
             KillTimer(hwnd_, kAnimTimerId);
@@ -2180,6 +2211,8 @@ void MainWindow::SnapCapsuleToNearestEdge() {
     SetWindowPos(hwnd_, HWND_TOPMOST, target.left, target.top,
                  target.right - target.left, target.bottom - target.top, SWP_NOACTIVATE);
     capsuleHover_ = false; // 吸附到新位后清 hover，由后续鼠标移动重新判定
+    capsuleHoverT_ = 0.0;
+    KillTimer(hwnd_, kHoverTimerId);
     UpdateLayeredState();  // 按最终尺寸刷新折叠入口 alpha
     ScheduleSave();
     InvalidateRect(hwnd_, nullptr, FALSE);
@@ -2222,6 +2255,8 @@ void MainWindow::StartCapsuleAnim(bool expand) {
     animActive_ = true;
     capsuleExpanded_ = expand; // 立即置目标态，绘制据此选择胶囊或完整内容
     capsuleHover_ = false;     // 形态切换：清 hover，折叠后由鼠标移动重新触发
+    capsuleHoverT_ = 0.0;      // hover 缓动归零，展开期间不画入口
+    KillTimer(hwnd_, kHoverTimerId);
     SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     UpdateLayeredState(); // 动画期间（animActive_）保持不透明
     SetTimer(hwnd_, kAnimTimerId, 15, nullptr);
@@ -2245,6 +2280,19 @@ void MainWindow::OnAnimTick() {
         UpdateLayeredState(); // 折叠静止 → 恢复 per-pixel 入口
         InvalidateRect(hwnd_, nullptr, FALSE); // 定型后按最终态（胶囊/完整）重绘
     }
+}
+
+void MainWindow::OnHoverTick() {
+    const double target = capsuleHover_ ? 1.0 : 0.0; // 进入朝醒(1)、离开朝睡(0)
+    if (capsuleHoverT_ < target) {
+        capsuleHoverT_ += kHoverStep;
+        if (capsuleHoverT_ > target) capsuleHoverT_ = target;
+    } else if (capsuleHoverT_ > target) {
+        capsuleHoverT_ -= kHoverStep;
+        if (capsuleHoverT_ < target) capsuleHoverT_ = target;
+    }
+    InvalidateRect(hwnd_, nullptr, FALSE);
+    if (capsuleHoverT_ == target) KillTimer(hwnd_, kHoverTimerId); // 到端点即停，空闲零重绘
 }
 
 // ——————————————————————————— 行为 ———————————————————————————
