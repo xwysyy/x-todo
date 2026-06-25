@@ -73,6 +73,9 @@ add_xtodo_test(xtodo_launch_command_tests
     ../src/TaskSchedulerReminder.cpp
     ../src/CalendarDate.cpp
 )
+if(WIN32)
+    target_link_libraries(xtodo_launch_command_tests PRIVATE taskschd comsuppw ole32)
+endif()
 
 add_xtodo_test(xtodo_gui_contract_tests
     gui_contract_tests.cpp
