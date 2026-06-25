@@ -1,4 +1,5 @@
 #include "SettingsWindow.h"
+#include "ReminderSettingsPolicy.h"
 #include "ThemedWindowControls.h"
 
 #include <windowsx.h>
@@ -20,8 +21,39 @@ template <class T> void SafeRelease(T** p) {
     }
 }
 
-enum class RowKind { Section, Language, ToggleAutostart, ToggleBackup, Folder, Status };
-enum class Action { None, LangZh, LangEn, Autostart, BackupToggle, BackupFolder, Close };
+enum class RowKind {
+    Section,
+    Language,
+    ToggleAutostart,
+    ToggleReminderEnable,
+    ToggleReminderBeforeStart5,
+    ToggleReminderHalfway,
+    ToggleReminderInAppPopup,
+    ToggleReminderCapsulePulse,
+    ToggleReminderSystemNotification,
+    ToggleReminderTaskSchedulerFallback,
+    ToggleReminderCatchUp,
+    ToggleBackup,
+    Folder,
+    Status
+};
+enum class Action {
+    None,
+    LangZh,
+    LangEn,
+    Autostart,
+    ReminderEnable,
+    ReminderBeforeStart5,
+    ReminderHalfway,
+    ReminderInAppPopup,
+    ReminderCapsulePulse,
+    ReminderSystemNotification,
+    ReminderTaskSchedulerFallback,
+    ReminderCatchUp,
+    BackupToggle,
+    BackupFolder,
+    Close
+};
 
 int ClampInt(int value, int minValue, int maxValue) {
     if (value < minValue) return minValue;
@@ -87,6 +119,21 @@ void BuildRows(State& s) {
     add(RowKind::Section, T(Str::SettingsGeneral, h.lang));
     add(RowKind::Language, T(Str::Language, h.lang));
     add(RowKind::ToggleAutostart, T(Str::Autostart, h.lang));
+
+    add(RowKind::Section, T(Str::SettingsReminders, h.lang));
+    add(RowKind::ToggleReminderEnable, T(Str::ReminderEnable, h.lang));
+    add(RowKind::ToggleReminderBeforeStart5, T(Str::ReminderBeforeStart5, h.lang));
+    add(RowKind::ToggleReminderHalfway, T(Str::ReminderHalfway, h.lang));
+    add(RowKind::ToggleReminderInAppPopup, T(Str::ReminderInAppPopup, h.lang));
+    add(RowKind::ToggleReminderCapsulePulse, T(Str::ReminderCapsulePulse, h.lang));
+    add(RowKind::ToggleReminderSystemNotification, T(Str::ReminderSystemNotification, h.lang));
+    add(RowKind::ToggleReminderTaskSchedulerFallback,
+        T(Str::ReminderTaskSchedulerFallback, h.lang));
+    add(RowKind::ToggleReminderCatchUp, T(Str::ReminderCatchUp, h.lang));
+    if (!h.reminderNotificationStatus.empty())
+        add(RowKind::Status, L"", h.reminderNotificationStatus);
+    if (!h.reminderSchedulerStatus.empty())
+        add(RowKind::Status, L"", h.reminderSchedulerStatus);
 
     add(RowKind::Section, T(Str::SettingsDataBackup, h.lang));
     add(RowKind::ToggleBackup, T(Str::AutoBackup, h.lang));
@@ -212,6 +259,22 @@ Action ActionAt(State& s, int x, int y) {
             }
             case RowKind::ToggleAutostart:
                 return PtIn(RowRect(s, row), x, y) ? Action::Autostart : Action::None;
+            case RowKind::ToggleReminderEnable:
+                return PtIn(RowRect(s, row), x, y) ? Action::ReminderEnable : Action::None;
+            case RowKind::ToggleReminderBeforeStart5:
+                return PtIn(RowRect(s, row), x, y) ? Action::ReminderBeforeStart5 : Action::None;
+            case RowKind::ToggleReminderHalfway:
+                return PtIn(RowRect(s, row), x, y) ? Action::ReminderHalfway : Action::None;
+            case RowKind::ToggleReminderInAppPopup:
+                return PtIn(RowRect(s, row), x, y) ? Action::ReminderInAppPopup : Action::None;
+            case RowKind::ToggleReminderCapsulePulse:
+                return PtIn(RowRect(s, row), x, y) ? Action::ReminderCapsulePulse : Action::None;
+            case RowKind::ToggleReminderSystemNotification:
+                return PtIn(RowRect(s, row), x, y) ? Action::ReminderSystemNotification : Action::None;
+            case RowKind::ToggleReminderTaskSchedulerFallback:
+                return PtIn(RowRect(s, row), x, y) ? Action::ReminderTaskSchedulerFallback : Action::None;
+            case RowKind::ToggleReminderCatchUp:
+                return PtIn(RowRect(s, row), x, y) ? Action::ReminderCatchUp : Action::None;
             case RowKind::ToggleBackup:
                 return PtIn(RowRect(s, row), x, y) ? Action::BackupToggle : Action::None;
             case RowKind::Folder:
@@ -363,13 +426,61 @@ void Paint(State& s) {
                 break;
             }
             case RowKind::ToggleAutostart:
+            case RowKind::ToggleReminderEnable:
+            case RowKind::ToggleReminderBeforeStart5:
+            case RowKind::ToggleReminderHalfway:
+            case RowKind::ToggleReminderInAppPopup:
+            case RowKind::ToggleReminderCapsulePulse:
+            case RowKind::ToggleReminderSystemNotification:
+            case RowKind::ToggleReminderTaskSchedulerFallback:
+            case RowKind::ToggleReminderCatchUp:
             case RowKind::ToggleBackup: {
-                const bool on = row.kind == RowKind::ToggleAutostart
-                              ? s.host->autostart
-                              : !s.host->backupDir.empty();
-                const Action act = row.kind == RowKind::ToggleAutostart
-                                 ? Action::Autostart
-                                 : Action::BackupToggle;
+                bool on = false;
+                Action act = Action::None;
+                switch (row.kind) {
+                    case RowKind::ToggleAutostart:
+                        on = s.host->autostart;
+                        act = Action::Autostart;
+                        break;
+                    case RowKind::ToggleReminderEnable:
+                        on = s.host->reminders.enabled;
+                        act = Action::ReminderEnable;
+                        break;
+                    case RowKind::ToggleReminderBeforeStart5:
+                        on = s.host->reminders.beforeStart5;
+                        act = Action::ReminderBeforeStart5;
+                        break;
+                    case RowKind::ToggleReminderHalfway:
+                        on = s.host->reminders.halfway;
+                        act = Action::ReminderHalfway;
+                        break;
+                    case RowKind::ToggleReminderInAppPopup:
+                        on = s.host->reminders.inAppPopup;
+                        act = Action::ReminderInAppPopup;
+                        break;
+                    case RowKind::ToggleReminderCapsulePulse:
+                        on = s.host->reminders.capsulePulse;
+                        act = Action::ReminderCapsulePulse;
+                        break;
+                    case RowKind::ToggleReminderSystemNotification:
+                        on = s.host->reminders.systemNotification;
+                        act = Action::ReminderSystemNotification;
+                        break;
+                    case RowKind::ToggleReminderTaskSchedulerFallback:
+                        on = s.host->reminders.taskSchedulerFallback;
+                        act = Action::ReminderTaskSchedulerFallback;
+                        break;
+                    case RowKind::ToggleReminderCatchUp:
+                        on = s.host->reminders.catchUpAfterResume;
+                        act = Action::ReminderCatchUp;
+                        break;
+                    case RowKind::ToggleBackup:
+                        on = !s.host->backupDir.empty();
+                        act = Action::BackupToggle;
+                        break;
+                    default:
+                        break;
+                }
                 if (s.hover == act) {
                     RECT hover{ rr.left - Ui::Px(s.hwnd, 8), rr.top + Ui::Px(s.hwnd, 4),
                                 rr.right + Ui::Px(s.hwnd, 8), rr.bottom - Ui::Px(s.hwnd, 4) };
@@ -438,6 +549,9 @@ void Rebuild(State& s) {
 
 void DoAction(State& s, Action action) {
     Host& h = *s.host;
+    auto applyReminders = [&]() {
+        if (h.setReminderSettings) h.setReminderSettings(h.reminders);
+    };
     switch (action) {
         case Action::LangZh:
             if (h.setLanguage) h.setLanguage(Lang::Zh);
@@ -447,6 +561,38 @@ void DoAction(State& s, Action action) {
             break;
         case Action::Autostart:
             if (h.setAutostart) h.setAutostart(!h.autostart);
+            break;
+        case Action::ReminderEnable:
+            if (ApplyReminderSettingAction(h.reminders, ReminderSettingAction::Enable))
+                applyReminders();
+            break;
+        case Action::ReminderBeforeStart5:
+            if (ApplyReminderSettingAction(h.reminders, ReminderSettingAction::BeforeStart5))
+                applyReminders();
+            break;
+        case Action::ReminderHalfway:
+            if (ApplyReminderSettingAction(h.reminders, ReminderSettingAction::Halfway))
+                applyReminders();
+            break;
+        case Action::ReminderInAppPopup:
+            if (ApplyReminderSettingAction(h.reminders, ReminderSettingAction::InAppPopup))
+                applyReminders();
+            break;
+        case Action::ReminderCapsulePulse:
+            if (ApplyReminderSettingAction(h.reminders, ReminderSettingAction::CapsulePulse))
+                applyReminders();
+            break;
+        case Action::ReminderSystemNotification:
+            if (ApplyReminderSettingAction(h.reminders, ReminderSettingAction::SystemNotification))
+                applyReminders();
+            break;
+        case Action::ReminderTaskSchedulerFallback:
+            if (ApplyReminderSettingAction(h.reminders, ReminderSettingAction::TaskSchedulerFallback))
+                applyReminders();
+            break;
+        case Action::ReminderCatchUp:
+            if (ApplyReminderSettingAction(h.reminders, ReminderSettingAction::CatchUp))
+                applyReminders();
             break;
         case Action::BackupToggle:
             if (h.backupDir.empty()) {
@@ -569,7 +715,7 @@ void ShowSettingsWindow(HWND owner, Host& host,
 
     UINT dpi = owner ? GetDpiForWindow(owner) : 96;
     state.w = MulDiv(390, dpi, 96);
-    state.h = MulDiv(342, dpi, 96);
+    state.h = MulDiv(430, dpi, 96);
 
     int x = MulDiv(120, dpi, 96);
     int y = MulDiv(80, dpi, 96);

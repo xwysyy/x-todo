@@ -1,6 +1,8 @@
 #pragma once
 #include <string>
+#include <vector>
 #include "CalendarModel.h"
+#include "ReminderTypes.h"
 #include "TodoModel.h"
 
 struct WindowGeometry {
@@ -31,6 +33,7 @@ struct UiState {
     std::string activeView      = "list";  // list | calendar
     std::string calendarDay     = "";      // YYYY-MM-DD；空表示启动时使用本地日期
     CalendarViewMode calendarView = CalendarViewMode::Day; // 日历视图：day | week | month
+    ReminderSettings reminders;             // 日历块全局提醒设置
     std::wstring backupDir;                // 自动备份目录；空表示关闭
     long long backupLastEpoch = 0;         // UTC epoch seconds；0 表示尚未成功备份
 };
@@ -53,8 +56,13 @@ namespace Store {
     std::wstring BackupTargetPath(const std::wstring& backupDir);
     // Missing=无文件；Loaded=成功；Failed=文件存在但读取失败（已自动备份为 .corrupt.bak）。
     LoadResult Load(TodoModel& model, CalendarModel& calendar, WindowGeometry& geom, UiState& ui);
+    LoadResult Load(TodoModel& model, CalendarModel& calendar, WindowGeometry& geom, UiState& ui,
+                    std::vector<ReminderLogEntry>& reminderLog);
     // 原子写（临时文件 + 替换），成功返回 true。
     bool Save(const TodoModel& model, const CalendarModel& calendar,
               const WindowGeometry& geom, const UiState& ui);
+    bool Save(const TodoModel& model, const CalendarModel& calendar,
+              const WindowGeometry& geom, const UiState& ui,
+              const std::vector<ReminderLogEntry>& reminderLog);
     BackupResult BackupDataFileTo(const std::wstring& backupDir);
 }

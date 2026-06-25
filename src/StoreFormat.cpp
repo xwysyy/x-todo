@@ -100,10 +100,48 @@ std::wstring GetWide(const json& o, const char* key) {
     return Utf8ToWide(GetUtf8(o, key));
 }
 
+void ParseReminderSettings(const json& u, ReminderSettings& reminders) {
+    auto it = u.find("reminders");
+    if (it == u.end() || !it->is_object()) return;
+    const json& r = *it;
+    reminders.enabled = GetBool(r, "enabled", reminders.enabled);
+    reminders.beforeStart5 = GetBool(r, "beforeStart5", reminders.beforeStart5);
+    reminders.halfway = GetBool(r, "halfway", reminders.halfway);
+    reminders.inAppPopup = GetBool(r, "inAppPopup", reminders.inAppPopup);
+    reminders.capsulePulse = GetBool(r, "capsulePulse", reminders.capsulePulse);
+    reminders.systemNotification = GetBool(r, "systemNotification", reminders.systemNotification);
+    reminders.taskSchedulerFallback =
+        GetBool(r, "taskSchedulerFallback", reminders.taskSchedulerFallback);
+    reminders.catchUpAfterResume = GetBool(r, "catchUpAfterResume", reminders.catchUpAfterResume);
+    const int grace = GetInt(r, "catchUpGraceMinutes", reminders.catchUpGraceMinutes);
+    if (grace > 0 && grace <= 24 * 60) reminders.catchUpGraceMinutes = grace;
+}
+
+json SerializeReminderSettings(const ReminderSettings& reminders) {
+    json r = json::object();
+    r["enabled"] = reminders.enabled;
+    r["beforeStart5"] = reminders.beforeStart5;
+    r["halfway"] = reminders.halfway;
+    r["inAppPopup"] = reminders.inAppPopup;
+    r["capsulePulse"] = reminders.capsulePulse;
+    r["systemNotification"] = reminders.systemNotification;
+    r["taskSchedulerFallback"] = reminders.taskSchedulerFallback;
+    r["catchUpAfterResume"] = reminders.catchUpAfterResume;
+    r["catchUpGraceMinutes"] = reminders.catchUpGraceMinutes;
+    return r;
+}
+
 } // namespace
 
 bool Parse(const std::string& utf8, TodoModel& model, CalendarModel& calendar,
            WindowGeometry& geom, UiState& ui) {
+    std::vector<ReminderLogEntry> ignored;
+    return Parse(utf8, model, calendar, geom, ui, ignored);
+}
+
+bool Parse(const std::string& utf8, TodoModel& model, CalendarModel& calendar,
+           WindowGeometry& geom, UiState& ui, std::vector<ReminderLogEntry>& reminderLog) {
+    reminderLog.clear();
     // 空文件或纯空白：当作首次运行，以安全默认值启动并视为成功。
     const bool blank = std::all_of(utf8.begin(), utf8.end(), [](char c) {
         return c == ' ' || c == '\t' || c == '\r' || c == '\n';
@@ -180,12 +218,25 @@ bool Parse(const std::string& utf8, TodoModel& model, CalendarModel& calendar,
             else if (v == "week") ui.calendarView = CalendarViewMode::Week;
             else if (v == "month") ui.calendarView = CalendarViewMode::Month;
         }
+        ParseReminderSettings(u, ui.reminders);
         ui.backupDir = GetWide(u, "backupDir");
         {
             long long ts = GetLongLong(u, "backupLastEpoch", 0);
             ui.backupLastEpoch = ts > 0 ? ts : 0;
         }
         selectedListId = GetUtf8(u, "currentList");
+    }
+
+    auto logIt = root.find("reminderLog");
+    if (logIt != root.end() && logIt->is_array()) {
+        for (const json& entry : *logIt) {
+            if (!entry.is_object()) continue;
+            ReminderLogEntry out;
+            out.key = GetUtf8(entry, "key");
+            out.firedAt = GetLongLong(entry, "firedAt", 0);
+            if (!out.key.empty() && out.firedAt > 0)
+                reminderLog.push_back(std::move(out));
+        }
     }
 
     std::vector<CalendarBlock> blocks;
@@ -237,6 +288,13 @@ bool Parse(const std::string& utf8, TodoModel& model, CalendarModel& calendar,
 
 std::string Serialize(const TodoModel& model, const CalendarModel& calendar,
                       const WindowGeometry& geom, const UiState& ui) {
+    const std::vector<ReminderLogEntry> emptyLog;
+    return Serialize(model, calendar, geom, ui, emptyLog);
+}
+
+std::string Serialize(const TodoModel& model, const CalendarModel& calendar,
+                      const WindowGeometry& geom, const UiState& ui,
+                      const std::vector<ReminderLogEntry>& reminderLog) {
     json root = json::object();
 
     if (geom.valid) {
@@ -265,10 +323,23 @@ std::string Serialize(const TodoModel& model, const CalendarModel& calendar,
     u["calendarView"] = (ui.calendarView == CalendarViewMode::Week)    ? "week"
                         : (ui.calendarView == CalendarViewMode::Month) ? "month"
                                                                        : "day";
+    u["reminders"] = SerializeReminderSettings(ui.reminders);
     if (!ui.backupDir.empty()) u["backupDir"] = WideToUtf8(ui.backupDir);
     if (ui.backupLastEpoch > 0) u["backupLastEpoch"] = ui.backupLastEpoch;
     u["currentList"] = model.CurrentList().id;
     root["ui"] = std::move(u);
+
+    if (!reminderLog.empty()) {
+        json log = json::array();
+        for (const ReminderLogEntry& entry : reminderLog) {
+            if (entry.key.empty() || entry.firedAt <= 0) continue;
+            json item = json::object();
+            item["key"] = entry.key;
+            item["firedAt"] = entry.firedAt;
+            log.push_back(std::move(item));
+        }
+        if (!log.empty()) root["reminderLog"] = std::move(log);
+    }
 
     json cal = json::array();
     for (const CalendarBlock& block : calendar.Blocks()) {

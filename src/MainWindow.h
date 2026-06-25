@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include "CalendarLayout.h"
+#include "ReminderService.h"
 #include "TodoModel.h"
 #include "Store.h"
 #include "I18n.h"
@@ -13,6 +14,8 @@
 
 constexpr UINT WM_TRAY     = WM_APP + 1; // 托盘回调消息
 constexpr UINT WM_APP_SHOW = WM_APP + 2; // 第二实例请求显示
+constexpr UINT WM_APP_REMINDER_OPEN = WM_APP + 3; // 提醒弹窗请求打开日历块
+constexpr UINT WM_APP_REMINDER_CHECK = WM_APP + 4; // 提醒 fallback 请求执行一次检查
 inline constexpr wchar_t kWindowClass[] = L"XTodoWindowClass";
 
 // 挂载形态：普通窗口 / 挂到桌面层 / 侧边吸附胶囊
@@ -30,10 +33,13 @@ enum class MainView { Lists, Calendar };
 // 桌面便签主窗口：无边框、Direct2D 自绘、托盘常驻。
 class MainWindow {
 public:
+    ~MainWindow();
     bool Create();
     void Show(bool expandCapsule = true);
     void InitialShow(); // 冷启动首显
     HWND Hwnd() const { return hwnd_; }
+    void OpenReminderTarget(int blockId);
+    void RunReminderCheckOnce(bool backgroundOnly = false);
 
 private:
     // —— 窗口生命周期 ——
@@ -280,6 +286,15 @@ private:
     void MaybeRunAutoBackup(bool force);
     bool RunAutoBackupNow();
     std::wstring BackupStatusText() const;
+    void RefreshReminderSchedule();
+    void RefreshReminderSchedulerFallback();
+    void StartReminderTimer();
+    void StopReminderTimer();
+    void OnReminderTimer(bool catchUp);
+    bool DispatchReminders(const std::vector<ReminderCandidate>& due);
+    bool ShowSystemReminder(const std::vector<ReminderCandidate>& due);
+    bool ShowBackgroundSystemReminder(const std::vector<ReminderCandidate>& due);
+    bool StartCapsuleReminderPulse(const std::vector<ReminderCandidate>& due);
 
     // —— DPI ——
     float dpiScale() const { return dpi_ / 96.0f; }
@@ -300,6 +315,7 @@ private:
 
     TodoModel      model_;
     CalendarModel  calendar_;
+    ReminderService reminders_;
     WindowGeometry geom_;
     UiState        ui_;
 
@@ -369,6 +385,18 @@ private:
     double    capsuleHoverT_   = 0.0;    // 折叠入口 hover 缓动进度 0..1（仅过渡期间重绘）
     bool      menuOpen_        = false;  // 弹出菜单存活期间：抑制 WM_MOUSELEAVE 误触收缩
     bool      calendarSyncing_ = false;  // 同步日历编辑框文本时抑制 EN_CHANGE 写回
+    struct ReminderVisualState {
+        bool active = false;
+        int blockId = -1;
+        long long untilEpoch = 0;
+        double pulseT = 0.0;
+        int pendingCount = 0;
+    } reminderVisual_;
+    int       lastSystemReminderBlockId_ = -1;
+    std::wstring reminderNotificationStatus_;
+    std::wstring reminderSchedulerStatus_;
+    bool      reminderSchedulerSynced_ = false;
+    bool      reminderSchedulerRegistered_ = false;
     int       layeredMode_     = 0;      // 0=none, 2=per-pixel alpha folded entry
     POINT     capsulePressClient_{};     // 按下点（客户坐标，拖动时窗口跟随）
     POINT     capsulePressScreen_{};     // 按下点（屏幕坐标，阈值判定）
@@ -383,8 +411,10 @@ private:
     static constexpr UINT_PTR kSaveTimerId = 1;
     static constexpr UINT_PTR kCollapseTimerId = 4;     // 展开胶囊：鼠标离开后的折叠宽限定时器
     static constexpr UINT_PTR kBackupTimerId = 5;       // 自动备份到用户指定目录
+    static constexpr UINT_PTR kReminderTimerId = 6;      // 日历块提醒检查
     static constexpr UINT      kCollapseDelayMs = 500;  // 折叠宽限毫秒：移回即取消，避免太敏感
     static constexpr UINT      kBackupCheckMs = 60 * 1000;
+    static constexpr UINT      kReminderCheckMaxMs = 60 * 1000;
     static constexpr long long kBackupIntervalSeconds = 60 * 60;
     enum class BackupStatus { None, Ready, Failed, ChooseFailed, SameFolder };
     bool savePending_ = false;

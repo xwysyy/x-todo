@@ -24,6 +24,10 @@ const Str kAllStrings[] = {
     Str::AutoBackup, Str::BackupFolder, Str::BackupChangeFolder,
     Str::BackupLast, Str::BackupNever, Str::BackupDisabled, Str::BackupReady,
     Str::BackupFailed, Str::BackupChooseFailed, Str::BackupSameFolder,
+    Str::SettingsReminders, Str::ReminderEnable, Str::ReminderBeforeStart5,
+    Str::ReminderHalfway, Str::ReminderInAppPopup, Str::ReminderCapsulePulse,
+    Str::ReminderSystemNotification, Str::ReminderTaskSchedulerFallback,
+    Str::ReminderCatchUp, Str::ReminderOpen, Str::ReminderDismiss,
     Str::ThemeHeader,
     Str::ThemeFollowSystem, Str::ThemePaper, Str::ThemeMint, Str::ThemeSky,
     Str::ThemeRose, Str::ThemeSand, Str::ThemeCustom, Str::ThemeManager,
@@ -56,6 +60,12 @@ void KeyTranslationsMatchBehavioralExpectations() {
     EXPECT_EQ(std::wstring(T(Str::ListDefault, Lang::En)), std::wstring(L"Inbox"));
     EXPECT_TRUE(std::wstring(T(Str::LoadFailedMsg, Lang::En)).find(L"corrupt.bak") != std::wstring::npos);
     EXPECT_TRUE(std::wstring(T(Str::LoadFailedMsg, Lang::Zh)).find(L"corrupt.bak") != std::wstring::npos);
+    EXPECT_EQ(std::wstring(T(Str::ReminderBeforeStart5, Lang::Zh)), std::wstring(L"开始前 5 分钟"));
+    EXPECT_EQ(std::wstring(T(Str::ReminderHalfway, Lang::En)), std::wstring(L"Halfway through"));
+    EXPECT_EQ(std::wstring(T(Str::ReminderTaskSchedulerFallback, Lang::En)),
+              std::wstring(L"Task Scheduler fallback"));
+    EXPECT_EQ(std::wstring(T(Str::ReminderOpen, Lang::Zh)), std::wstring(L"打开"));
+    EXPECT_EQ(std::wstring(T(Str::ReminderDismiss, Lang::En)), std::wstring(L"Dismiss"));
 }
 
 void SystemDefaultLangReturnsKnownEnumValue() {

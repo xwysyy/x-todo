@@ -1,6 +1,7 @@
 #pragma once
 
 #include "I18n.h"
+#include "ReminderTypes.h"
 #include "Theme.h"
 
 #include <d2d1.h>
@@ -18,9 +19,13 @@ struct Host {
     std::wstring backupDir;
     long long backupLastEpoch = 0;
     std::wstring backupStatus;
+    std::wstring reminderNotificationStatus;
+    std::wstring reminderSchedulerStatus;
+    ReminderSettings reminders;
 
     std::function<void(Lang)> setLanguage;
     std::function<void(bool)> setAutostart;
+    std::function<void(const ReminderSettings&)> setReminderSettings;
     std::function<void(HWND)> chooseBackupFolder;
     std::function<void()> disableBackup;
 };

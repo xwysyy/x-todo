@@ -27,13 +27,19 @@ if(XTODO_BUILD_APP)
         src/CalendarModel.cpp
         src/EditIntent.cpp
         src/GeometryPolicy.cpp
+        src/LaunchCommand.cpp
         src/MenuModel.cpp
+        src/ReminderService.cpp
+        src/ReminderPopup.cpp
+        src/ReminderText.cpp
         src/SettingsWindow.cpp
         src/ViewLayout.cpp
         src/WindowHitTest.cpp
+        src/WindowsNotifier.cpp
         src/TodoModel.cpp
         src/Store.cpp
         src/StoreFormat.cpp
+        src/TaskSchedulerReminder.cpp
         src/Autostart.cpp
         src/I18n.cpp
         src/Theme.cpp
@@ -64,6 +70,10 @@ if(XTODO_BUILD_APP)
         dwmapi
         advapi32
         shlwapi
+        taskschd
+        comsuppw
+        runtimeobject
+        propsys
     )
 
     if(MSVC)

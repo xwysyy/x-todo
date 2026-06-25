@@ -1278,6 +1278,13 @@ void MainWindow::DrawAddTaskRow(bool hovered) {
 void MainWindow::DrawCalendarDay(float W, float H) {
     const float top = ContentTop();
     const GuiCalendar::Frame& frame = calendarFrame_;
+    if (reminderVisual_.untilEpoch > 0 &&
+        static_cast<long long>(std::time(nullptr)) > reminderVisual_.untilEpoch) {
+        reminderVisual_.active = false;
+        reminderVisual_.blockId = -1;
+        reminderVisual_.pendingCount = 0;
+        reminderVisual_.untilEpoch = 0;
+    }
 
     // 皮肤色跟随主题；事件块色固定（CalendarTheme）。
     const uint32_t soft = Theme::Blend(theme_.colors.paperEdge, theme_.colors.paper, 0.45f);
@@ -1334,6 +1341,13 @@ void MainWindow::DrawCalendarDay(float W, float H) {
         FillRoundRect(D2D1_ROUNDED_RECT{ r, radius, radius }, bc.fill);
         StrokeRoundRect(D2D1_ROUNDED_RECT{ r, radius, radius },
                         bc.edge, S(selected ? 1.6f : 1.0f));
+        if (reminderVisual_.blockId == block->id && reminderVisual_.untilEpoch > 0) {
+            brush_->SetColor(Theme::D2DColor(theme_.colors.focusRing, 0.72f));
+            rt_->DrawRoundedRectangle(D2D1_ROUNDED_RECT{ D2D1::RectF(r.left - S(2), r.top - S(2),
+                                                                     r.right + S(2), r.bottom + S(2)),
+                                                        radius + S(2), radius + S(2) },
+                                      brush_, S(2.2f));
+        }
 
         if (selected) {
             auto focusField = [&]() {
@@ -1757,6 +1771,11 @@ bool MainWindow::Render() {
 
 bool MainWindow::RenderCapsuleEntryLayered() {
     if (layeredMode_ != 2) UpdateLayeredState();
+    if (reminderVisual_.active && reminderVisual_.untilEpoch > 0 &&
+        static_cast<long long>(std::time(nullptr)) > reminderVisual_.untilEpoch) {
+        reminderVisual_.active = false;
+        reminderVisual_.pendingCount = 0;
+    }
 
     RECT client{};
     GetClientRect(hwnd_, &client);
@@ -1801,14 +1820,24 @@ bool MainWindow::RenderCapsuleEntryLayered() {
             break;
         case CapsuleStyle::Pip: {
             const int n = model_.TotalActiveCount();
+            const bool reminderPending = reminderVisual_.active && reminderVisual_.pendingCount > 0;
             const uint32_t fill = capsuleHover_
-                ? (n > 0 ? theme_.capsule.dotActiveHover : theme_.capsule.dotIdleHover)
-                : (n > 0 ? theme_.capsule.dotActive : theme_.capsule.dotIdle);
+                ? ((n > 0 || reminderPending) ? theme_.capsule.dotActiveHover : theme_.capsule.dotIdleHover)
+                : ((n > 0 || reminderPending) ? theme_.capsule.dotActive : theme_.capsule.dotIdle);
             const uint32_t edge = capsuleHover_ ? theme_.capsule.dotEdgeHover
                                                 : theme_.capsule.dotEdge;
             DrawCapsuleDotEntry(canvas, fill, edge);
             break;
         }
+    }
+    if (reminderVisual_.active && reminderVisual_.pendingCount > 0) {
+        const double cx = rightDock ? (w - 9.0) : 9.0;
+        const double cy = 9.0;
+        FillEllipsePixels(canvas, cx, cy, 6.5, 6.5, theme_.colors.focusRing, 230);
+        StrokeEllipsePixels(canvas, cx, cy, 6.5, 6.5, 1.5, theme_.colors.paper, 220);
+        if (reminderVisual_.pendingCount > 1)
+            FillEllipsePixels(canvas, cx + (rightDock ? -3.0 : 3.0), cy - 3.0,
+                              2.0, 2.0, theme_.colors.paper, 245);
     }
 
     HGDIOBJ old = SelectObject(mem, bmp);
@@ -2044,6 +2073,7 @@ void MainWindow::OnMouseMove(float x, float y, bool lButton) {
             if (id > 0) {
                 calendarDrag_.mode = CalendarDragMode::Creating;
                 calendarDrag_.blockId = id;
+                RefreshReminderSchedule();
                 BuildCalendarBlockRects();
                 InvalidateRect(hwnd_, nullptr, FALSE);
             }
@@ -2086,6 +2116,7 @@ void MainWindow::OnMouseMove(float x, float y, bool lButton) {
             changed = calendar_.SetBlockRange(calendarDrag_.blockId, calendarDrag_.originalStart, end);
         }
         if (changed) {
+            RefreshReminderSchedule();
             BuildCalendarBlockRects();
             if (calendarEditId_ == calendarDrag_.blockId) LayoutCalendarEditControls();
             ScheduleSave();
@@ -2433,6 +2464,7 @@ void MainWindow::EndCalendarEdit(bool removeEmpty) {
     if (removeEmpty && CalendarBlockTitleEmpty(blockId)) {
         calendar_.RemoveBlock(blockId);
     }
+    RefreshReminderSchedule();
     BuildCalendarBlockRects();
     ScheduleSave();
     SetFocus(hwnd_);
@@ -2504,6 +2536,7 @@ void MainWindow::OnCalendarEditChanged(HWND edit) {
     if (calendarSyncing_ || !calendarEditing()) return;
     if (edit == calendarTitleEdit_) {
         calendar_.SetBlockTitle(calendarEditId_, ReadWindowText(calendarTitleEdit_));
+        RefreshReminderSchedule();
         ScheduleSave();
         InvalidateRect(hwnd_, nullptr, FALSE);
     }
@@ -2521,6 +2554,7 @@ bool MainWindow::CommitCalendarTimeEdits(bool syncText) {
         return false;
 
     if (calendar_.SetBlockRange(calendarEditId_, range.startMinute, range.endMinute)) {
+        RefreshReminderSchedule();
         BuildCalendarBlockRects();
         LayoutCalendarEditControls();
         if (syncText) SyncCalendarEditors();
@@ -2627,6 +2661,7 @@ void MainWindow::ResetCalendarDrag() {
 void MainWindow::CancelCalendarCapture() {
     if (calendarDrag_.mode == CalendarDragMode::Creating && CalendarBlockTitleEmpty(calendarDrag_.blockId)) {
         calendar_.RemoveBlock(calendarDrag_.blockId);
+        RefreshReminderSchedule();
         BuildCalendarBlockRects();
     }
     ResetCalendarDrag();

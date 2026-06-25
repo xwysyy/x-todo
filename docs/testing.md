@@ -15,8 +15,20 @@ Win32 dependencies so they run in CI on both Linux and Windows.
 | `xtodo_model_property_tests` | broad model invariants after long mutation sequences, subtree contracts, `ReplaceLists` idempotence, invalid-operation reference transparency |
 | `xtodo_store_format_tests` | `data.json` round-trip, UTF-8 fidelity, UI-state enum validation and range clamping, malformed/deeply-nested/non-object rejection, calendar normalization, safe defaults on empty input |
 | `xtodo_store_format_hardening_tests` | adversarial persistence coverage for invalid input non-mutation, bracket-depth guard behavior, imported data normalization, unsafe UI fields, rich full-state round-trips |
+| `xtodo_reminder_service_tests` | reminder candidate generation, due scanning, catch-up rules, fired-key de-duplication, and log pruning |
+| `xtodo_reminder_format_tests` | reminder settings and reminder log persistence contracts |
+| `xtodo_reminder_text_tests` | single and grouped reminder display text shared by popup and notification surfaces |
+| `xtodo_reminder_popup_policy_tests` | Win32-free reminder popup monitor work-area placement policy |
+| `xtodo_reminder_visual_policy_tests` | Win32-free capsule reminder visual delivery policy |
+| `xtodo_reminder_scheduler_tests` | Task Scheduler reminder-check trigger boundary formatting |
+| `xtodo_reminder_scheduler_policy_tests` | Win32-free Task Scheduler fallback enable/delete/register decisions |
+| `xtodo_reminder_timer_policy_tests` | Win32-free reminder timer delay policy for capped wakeups and immediate due scans |
+| `xtodo_reminder_settings_policy_tests` | Win32-free reminder settings toggle contracts used by the settings window |
+| `xtodo_reminder_dispatch_policy_tests` | Win32-free reminder dispatch success contract for fired-log marking |
+| `xtodo_windows_notifier_tests` | Win32-free notification contracts for toast activation args and XML escaping |
 | `xtodo_theme_tests` | color helpers, built-in theme catalog stability, contrast thresholds, theme resolution and fallback behavior |
 | `xtodo_i18n_tests` | all declared UI strings in zh/en, important behavioral strings, default language result validity |
+| `xtodo_launch_command_tests` | Win32-free command-line activation contracts for reminder checks and toast target opening |
 | `xtodo_gui_contract_tests` | headless GUI contracts for non-client hit-testing, geometry capture policy, title/tab/row layout hit-testing, popup menu item models, and inline edit key intents |
 | `xtodo_calendar_date_tests` | focused Gregorian date parsing, leap-year rules, date arithmetic, weekday, week start, and month-grid anchors |
 | `xtodo_calendar_date_property_tests` | full-cycle Gregorian property coverage for leap years, month lengths, parse/format round-trips, date reversibility, and strict parsing |

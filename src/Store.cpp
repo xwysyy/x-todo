@@ -108,11 +108,19 @@ std::wstring Store::BackupTargetPath(const std::wstring& backupDir) {
 }
 
 LoadResult Store::Load(TodoModel& model, CalendarModel& calendar, WindowGeometry& geom, UiState& ui) {
+    std::vector<ReminderLogEntry> ignored;
+    return Load(model, calendar, geom, ui, ignored);
+}
+
+LoadResult Store::Load(TodoModel& model, CalendarModel& calendar, WindowGeometry& geom, UiState& ui,
+                       std::vector<ReminderLogEntry>& reminderLog) {
     std::wstring path = DataFilePath();
     if (path.empty()) return LoadResult::Missing;
 
-    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES)
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        reminderLog.clear();
         return LoadResult::Missing; // 首次运行，无数据文件
+    }
 
     std::string bytes;
     if (!ReadAllBytes(path, bytes)) {
@@ -122,7 +130,7 @@ LoadResult Store::Load(TodoModel& model, CalendarModel& calendar, WindowGeometry
     }
 
     // 解析失败（非合法 JSON / 嵌套过深 / 顶层非对象，疑似被外部写坏）：备份并报失败，避免后续保存清空它
-    if (!StoreFormat::Parse(bytes, model, calendar, geom, ui)) {
+    if (!StoreFormat::Parse(bytes, model, calendar, geom, ui, reminderLog)) {
         CopyFileW(path.c_str(), (path + L".corrupt.bak").c_str(), TRUE);
         return LoadResult::Failed;
     }
@@ -131,9 +139,16 @@ LoadResult Store::Load(TodoModel& model, CalendarModel& calendar, WindowGeometry
 
 bool Store::Save(const TodoModel& model, const CalendarModel& calendar,
                  const WindowGeometry& geom, const UiState& ui) {
+    const std::vector<ReminderLogEntry> emptyLog;
+    return Save(model, calendar, geom, ui, emptyLog);
+}
+
+bool Store::Save(const TodoModel& model, const CalendarModel& calendar,
+                 const WindowGeometry& geom, const UiState& ui,
+                 const std::vector<ReminderLogEntry>& reminderLog) {
     std::wstring path = DataFilePath();
     if (path.empty()) return false;
-    return WriteAllBytesAtomic(path, StoreFormat::Serialize(model, calendar, geom, ui));
+    return WriteAllBytesAtomic(path, StoreFormat::Serialize(model, calendar, geom, ui, reminderLog));
 }
 
 Store::BackupResult Store::BackupDataFileTo(const std::wstring& backupDir) {

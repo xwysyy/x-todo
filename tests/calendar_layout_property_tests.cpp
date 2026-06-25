@@ -93,6 +93,11 @@ void DayFrameBlockHitTestingAndMinuteMathStayConsistent() {
 
   const Gui::Rect rect = ComputeBlockRect(frame, 42, 9 * 60, 10 * 60);
   ExpectPositiveRect(rect);
+  const float targetScroll = ScrollForMinute(9 * 60, frame.timelineViewport.Height(), frame);
+  EXPECT_TRUE(targetScroll >= 0.0f);
+  EXPECT_TRUE(targetScroll <= frame.contentHeight - frame.timelineViewport.Height());
+  EXPECT_TRUE(rect.top - targetScroll >= 0.0f);
+  EXPECT_TRUE(rect.top - targetScroll <= frame.timelineViewport.Height());
   const float scroll = rect.top;
   const std::vector<BlockRect> blocks = {BlockRect{42, rect}};
   EXPECT_TRUE(HitTest(MidX(rect), frame.timelineViewport.top + 2.0f, scroll, 1.0f, frame, blocks).kind == HitKind::ResizeStart);

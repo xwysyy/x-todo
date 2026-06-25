@@ -59,6 +59,17 @@ const wchar_t* T(Str key, Lang lang) {
         case Str::BackupFailed:  return zh ? L"备份失败"        : L"Backup failed";
         case Str::BackupChooseFailed:return zh ? L"无法使用这个备份目录" : L"Could not use this backup folder";
         case Str::BackupSameFolder:return zh ? L"备份目录不能是当前数据目录" : L"Backup folder cannot be the current data folder";
+        case Str::SettingsReminders:return zh ? L"提醒"          : L"Reminders";
+        case Str::ReminderEnable:return zh ? L"启用日历块提醒"   : L"Calendar block reminders";
+        case Str::ReminderBeforeStart5:return zh ? L"开始前 5 分钟" : L"5 minutes before start";
+        case Str::ReminderHalfway:return zh ? L"进行到一半"      : L"Halfway through";
+        case Str::ReminderInAppPopup:return zh ? L"应用内弹窗"   : L"App popup";
+        case Str::ReminderCapsulePulse:return zh ? L"侧边栏动态效果" : L"Side capsule feedback";
+        case Str::ReminderSystemNotification:return zh ? L"Windows 系统通知" : L"Windows notification";
+        case Str::ReminderTaskSchedulerFallback:return zh ? L"系统计划任务回退" : L"Task Scheduler fallback";
+        case Str::ReminderCatchUp:return zh ? L"错过后补发仍有效提醒" : L"Catch up still-valid reminders";
+        case Str::ReminderOpen:return zh ? L"打开" : L"Open";
+        case Str::ReminderDismiss:return zh ? L"知道了" : L"Dismiss";
 
         case Str::ThemeHeader:        return zh ? L"皮肤"           : L"Theme";
         case Str::ThemeFollowSystem:  return zh ? L"跟随系统"       : L"Follow system";

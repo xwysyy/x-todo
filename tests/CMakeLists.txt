@@ -67,6 +67,13 @@ add_xtodo_test(xtodo_i18n_tests
     ../src/I18n.cpp
 )
 
+add_xtodo_test(xtodo_launch_command_tests
+    launch_command_tests.cpp
+    ../src/LaunchCommand.cpp
+    ../src/TaskSchedulerReminder.cpp
+    ../src/CalendarDate.cpp
+)
+
 add_xtodo_test(xtodo_gui_contract_tests
     gui_contract_tests.cpp
     ../src/EditIntent.cpp
@@ -105,3 +112,66 @@ add_xtodo_test(xtodo_calendar_layout_property_tests
     ../src/CalendarLayout.cpp
     ../src/CalendarModel.cpp
 )
+
+add_xtodo_test(xtodo_reminder_service_tests
+    reminder_service_tests.cpp
+    ../src/ReminderService.cpp
+    ../src/CalendarDate.cpp
+    ../src/CalendarModel.cpp
+)
+
+add_xtodo_test(xtodo_reminder_format_tests
+    reminder_format_tests.cpp
+    ../src/StoreFormat.cpp
+    ../src/CalendarModel.cpp
+    ../src/TodoModel.cpp
+)
+target_include_directories(xtodo_reminder_format_tests PRIVATE ../third_party)
+
+add_xtodo_test(xtodo_reminder_text_tests
+    reminder_text_tests.cpp
+    ../src/ReminderText.cpp
+    ../src/I18n.cpp
+)
+
+add_xtodo_test(xtodo_reminder_popup_policy_tests
+    reminder_popup_policy_tests.cpp
+)
+
+add_xtodo_test(xtodo_reminder_visual_policy_tests
+    reminder_visual_policy_tests.cpp
+)
+
+add_xtodo_test(xtodo_reminder_scheduler_tests
+    reminder_scheduler_tests.cpp
+    ../src/TaskSchedulerReminder.cpp
+    ../src/CalendarDate.cpp
+)
+if(WIN32)
+    target_link_libraries(xtodo_reminder_scheduler_tests PRIVATE taskschd comsuppw ole32)
+endif()
+
+add_xtodo_test(xtodo_reminder_scheduler_policy_tests
+    reminder_scheduler_policy_tests.cpp
+)
+
+add_xtodo_test(xtodo_reminder_timer_policy_tests
+    reminder_timer_policy_tests.cpp
+)
+
+add_xtodo_test(xtodo_reminder_settings_policy_tests
+    reminder_settings_policy_tests.cpp
+)
+
+add_xtodo_test(xtodo_reminder_dispatch_policy_tests
+    reminder_dispatch_policy_tests.cpp
+)
+
+add_xtodo_test(xtodo_windows_notifier_tests
+    windows_notifier_tests.cpp
+    ../src/WindowsNotifier.cpp
+    ../src/CalendarDate.cpp
+)
+if(WIN32)
+    target_link_libraries(xtodo_windows_notifier_tests PRIVATE shell32 ole32 runtimeobject propsys)
+endif()

@@ -3,6 +3,7 @@
 #include "Store.h"
 
 #include <string>
+#include <vector>
 
 // Pure persistence-format helpers for XTODO data.json.
 // They avoid Win32 so the JSON schema and UI-state validation can be unit-tested.
@@ -16,9 +17,14 @@ namespace StoreFormat {
 // fields fall back to defaults.
 bool Parse(const std::string& utf8, TodoModel& model, CalendarModel& calendar,
            WindowGeometry& geom, UiState& ui);
+bool Parse(const std::string& utf8, TodoModel& model, CalendarModel& calendar,
+           WindowGeometry& geom, UiState& ui, std::vector<ReminderLogEntry>& reminderLog);
 
 // Serializes the current model and UI state to pretty-printed UTF-8 JSON.
 std::string Serialize(const TodoModel& model, const CalendarModel& calendar,
                       const WindowGeometry& geom, const UiState& ui);
+std::string Serialize(const TodoModel& model, const CalendarModel& calendar,
+                      const WindowGeometry& geom, const UiState& ui,
+                      const std::vector<ReminderLogEntry>& reminderLog);
 
 } // namespace StoreFormat

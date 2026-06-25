@@ -53,6 +53,17 @@ enum class Str {
     BackupFailed, // 备份失败
     BackupChooseFailed, // 备份目录选择失败
     BackupSameFolder, // 备份目录等于数据目录
+    SettingsReminders, // 设置分组：提醒
+    ReminderEnable, // 启用日历提醒
+    ReminderBeforeStart5, // 开始前 5 分钟提醒
+    ReminderHalfway, // 进行到一半提醒
+    ReminderInAppPopup, // 应用内弹窗提醒
+    ReminderCapsulePulse, // 侧边胶囊动态提醒
+    ReminderSystemNotification, // Windows 系统通知
+    ReminderTaskSchedulerFallback, // Task Scheduler 回退提醒
+    ReminderCatchUp, // 错过后补发仍有效提醒
+    ReminderOpen, // 提醒弹窗打开目标
+    ReminderDismiss, // 提醒弹窗关闭
 
     // —— 主题 ——
     ThemeHeader,             // 菜单"皮肤"分组标题

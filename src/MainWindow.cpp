@@ -3,15 +3,24 @@
 #include "CalendarTheme.h"
 #include "GeometryPolicy.h"
 #include "MenuModel.h"
+#include "ReminderDispatchPolicy.h"
+#include "ReminderPopup.h"
+#include "ReminderSchedulerPolicy.h"
+#include "ReminderText.h"
+#include "ReminderTimerPolicy.h"
+#include "ReminderVisualPolicy.h"
 #include "SettingsWindow.h"
+#include "TaskSchedulerReminder.h"
 #include "Theme.h"
 #include "ThemeCatalog.h"
 #include "ThemeLoader.h"
 #include "ThemeManagerWindow.h"
+#include "WindowsNotifier.h"
 
 #include <windowsx.h>
 #include <shobjidl.h>
 #include <dwmapi.h>
+#include <cstdio>
 #include <ctime>
 #include <cwchar>
 #include <utility>
@@ -43,6 +52,15 @@ long long NowEpochSeconds() {
     return static_cast<long long>(std::time(nullptr));
 }
 
+ReminderMinute CurrentReminderMinute() {
+    SYSTEMTIME st{};
+    GetLocalTime(&st);
+    char day[16]{};
+    std::snprintf(day, sizeof(day), "%04d-%02d-%02d",
+                  (int)st.wYear, (int)st.wMonth, (int)st.wDay);
+    return ReminderMinute{day, (int)st.wHour * 60 + (int)st.wMinute};
+}
+
 HICON LoadSharedAppIcon(int cx, int cy) {
     return (HICON)LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(kAppIconResourceId),
                              IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR | LR_SHARED);
@@ -51,6 +69,13 @@ HICON LoadSharedAppIcon(int cx, int cy) {
 HICON LoadOwnedAppIcon(int cx, int cy) {
     return (HICON)LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(kAppIconResourceId),
                              IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR);
+}
+
+std::wstring CurrentExePath() {
+    wchar_t path[MAX_PATH]{};
+    DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return std::wstring();
+    return std::wstring(path, n);
 }
 
 // 显示器 szDevice（宽字符）转 UTF-8（size-then-resize，无越界）
@@ -1106,6 +1131,23 @@ std::vector<PopupMenuItem> ToPopupMenuItems(const std::vector<GuiMenu::Item>& mo
 
 // ——————————————————————————— 生命周期 ———————————————————————————
 
+MainWindow::~MainWindow() {
+    StopReminderTimer();
+    StopBackupTimer();
+    RemoveTrayIcon();
+    if (editFont_) { DeleteObject(editFont_); editFont_ = nullptr; }
+    if (editBg_) { DeleteObject(editBg_); editBg_ = nullptr; }
+    if (calendarEditBg_) { DeleteObject(calendarEditBg_); calendarEditBg_ = nullptr; }
+    if (calendarTitleEdit_) { DestroyWindow(calendarTitleEdit_); calendarTitleEdit_ = nullptr; }
+    if (calendarStartEdit_) { DestroyWindow(calendarStartEdit_); calendarStartEdit_ = nullptr; }
+    if (calendarEndEdit_) { DestroyWindow(calendarEndEdit_); calendarEndEdit_ = nullptr; }
+    DiscardDeviceResources();
+    SafeRelease(&dwrite_);
+    SafeRelease(&d2dFactory_);
+    if (hwnd_ && IsWindow(hwnd_)) DestroyWindow(hwnd_);
+    hwnd_ = nullptr;
+}
+
 bool MainWindow::RegisterWindowClass() {
     WNDCLASSEXW wc{};
     wc.cbSize        = sizeof(wc);
@@ -1123,7 +1165,9 @@ bool MainWindow::RegisterWindowClass() {
 bool MainWindow::Create() {
     if (!RegisterWindowClass()) return false;
 
-    LoadResult loadResult = Store::Load(model_, calendar_, geom_, ui_);
+    std::vector<ReminderLogEntry> reminderLog;
+    LoadResult loadResult = Store::Load(model_, calendar_, geom_, ui_, reminderLog);
+    reminders_.ImportLog(reminderLog);
 
     // 校验持久化几何：尺寸合理且至少落在某个显示器上，否则回退默认位置（防离屏/零尺寸找不回）
     int w = GuiGeometry::kDefaultWindowW, h = GuiGeometry::kDefaultWindowH;
@@ -1169,6 +1213,7 @@ bool MainWindow::Create() {
           : SystemDefaultLang();
     activeView_ = ui_.activeView == "calendar" ? MainView::Calendar : MainView::Lists;
     EnsureCalendarDay();
+    RefreshReminderSchedule();
     capsuleStyle_ = ui_.capsuleStyle == "dot" ? CapsuleStyle::Dot
                   : ui_.capsuleStyle == "bar" ? CapsuleStyle::Bar
                   : ui_.capsuleStyle == "pip" ? CapsuleStyle::Pip
@@ -1324,6 +1369,7 @@ LRESULT CALLBACK MainWindow::WndProcStatic(HWND hwnd, UINT msg, WPARAM wp, LPARA
 LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == explorerRestartMsg_ && explorerRestartMsg_ != 0) {
         AddTrayIcon(); // Explorer 重启后重新登记托盘图标
+        RefreshReminderSchedule();
         return 0;
     }
     switch (msg) {
@@ -1358,7 +1404,21 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
             std::string wantId = sysDark ? ui_.darkThemeId : ui_.lightThemeId;
             if (wantId != theme_.id) ApplyResolvedTheme(false);
         }
+        RefreshReminderSchedule();
         break; // 落到 DefWindowProc，保留系统默认处理
+
+    case WM_TIMECHANGE:
+        RefreshReminderSchedule();
+        OnReminderTimer(true);
+        return 0;
+
+    case WM_POWERBROADCAST:
+        if (wp == PBT_APMRESUMEAUTOMATIC || wp == PBT_APMRESUMESUSPEND) {
+            RefreshReminderSchedule();
+            OnReminderTimer(true);
+            return TRUE;
+        }
+        break;
 
     case WM_THEMECHANGED:
     case WM_DWMCOLORIZATIONCOLORCHANGED:
@@ -1497,10 +1557,20 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_TRAY:
         if (LOWORD(lp) == WM_LBUTTONDBLCLK) Show();
         else if (LOWORD(lp) == WM_RBUTTONUP) ShowTrayMenu();
+        else if (LOWORD(lp) == NIN_BALLOONUSERCLICK && lastSystemReminderBlockId_ > 0)
+            OpenReminderTarget(lastSystemReminderBlockId_);
         return 0;
 
     case WM_APP_SHOW:
         Show();
+        return 0;
+
+    case WM_APP_REMINDER_OPEN:
+        OpenReminderTarget(static_cast<int>(wp));
+        return 0;
+
+    case WM_APP_REMINDER_CHECK:
+        RunReminderCheckOnce();
         return 0;
 
     case WM_TIMER:
@@ -1524,6 +1594,8 @@ LRESULT MainWindow::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
             }
         } else if (wp == kBackupTimerId) {
             MaybeRunAutoBackup(false);
+        } else if (wp == kReminderTimerId) {
+            OnReminderTimer(false);
         }
         return 0;
 
@@ -1810,6 +1882,9 @@ void MainWindow::ShowSettings() {
         host.backupDir = ui_.backupDir;
         host.backupLastEpoch = ui_.backupLastEpoch;
         host.backupStatus = BackupStatusText();
+        host.reminderNotificationStatus = reminderNotificationStatus_;
+        host.reminderSchedulerStatus = reminderSchedulerStatus_;
+        host.reminders = ui_.reminders;
     };
     refresh();
 
@@ -1819,6 +1894,12 @@ void MainWindow::ShowSettings() {
     };
     host.setAutostart = [this, &refresh](bool enabled) {
         SetAutostart(enabled);
+        refresh();
+    };
+    host.setReminderSettings = [this, &refresh](const ReminderSettings& reminders) {
+        ui_.reminders = reminders;
+        RefreshReminderSchedule();
+        ScheduleSave();
         refresh();
     };
     host.chooseBackupFolder = [this, &refresh](HWND owner) {
@@ -1870,6 +1951,7 @@ void MainWindow::DeleteCalendarBlock(int blockId) {
     if (!calendar_.FindBlock(blockId)) return; // 结束编辑可能已回收空标题块
     if (!Confirm(Str::CalendarBlockDeleteMsg, MB_ICONWARNING)) return;
     if (!calendar_.RemoveBlock(blockId)) return;
+    RefreshReminderSchedule();
     BuildCalendarBlockRects();
     ScheduleSave();
     InvalidateRect(hwnd_, nullptr, FALSE);
@@ -2425,7 +2507,7 @@ void MainWindow::ScheduleSave() {
 
 bool MainWindow::SaveNow() {
     CaptureGeometry();
-    if (!Store::Save(model_, calendar_, geom_, ui_)) {
+    if (!Store::Save(model_, calendar_, geom_, ui_, reminders_.ExportLog())) {
         // 保存失败（磁盘满 / 占用 / 权限）：保留待存标记并延迟重试，不静默丢改动
         savePending_ = true;
         SetTimer(hwnd_, kSaveTimerId, 3000, nullptr);
@@ -2433,6 +2515,204 @@ bool MainWindow::SaveNow() {
     }
     savePending_ = false;
     return true;
+}
+
+void MainWindow::RefreshReminderSchedule() {
+    if (!ui_.reminders.systemNotification) reminderNotificationStatus_.clear();
+    if (reminders_.PruneLog(NowEpochSeconds())) ScheduleSave();
+    const ReminderMinute now = CurrentReminderMinute();
+    reminders_.Rebuild(calendar_, ui_.reminders, now);
+    StartReminderTimer();
+}
+
+void MainWindow::RefreshReminderSchedulerFallback() {
+    std::wstring error;
+    ReminderMinute next;
+    const ReminderMinute now = CurrentReminderMinute();
+    const bool hasNextDue = reminders_.NextDue(now, next);
+    const ReminderSchedulerDecision decision =
+        DecideReminderScheduler(ui_.reminders, hasNextDue,
+                                ReminderSchedulerState{reminderSchedulerSynced_,
+                                                       reminderSchedulerRegistered_});
+
+    if (decision.action == ReminderSchedulerAction::Noop) {
+        reminderSchedulerStatus_ = decision.status;
+        return;
+    }
+
+    if (decision.action == ReminderSchedulerAction::DeleteTask) {
+        if (TaskSchedulerReminder::DeleteReminderCheckTask(&error)) {
+            reminderSchedulerSynced_ = true;
+            reminderSchedulerRegistered_ = false;
+            reminderSchedulerStatus_ = decision.status;
+        } else {
+            reminderSchedulerSynced_ = false;
+            reminderSchedulerStatus_ = error;
+        }
+        return;
+    }
+
+    const std::wstring boundary = TaskSchedulerReminder::FormatStartBoundaryIsoLocal(next);
+    const std::wstring exePath = CurrentExePath();
+    if (boundary.empty() || exePath.empty()) {
+        reminderSchedulerStatus_ = L"Could not prepare reminder task trigger";
+        return;
+    }
+
+    if (TaskSchedulerReminder::RegisterReminderCheckTask(exePath, boundary, &error)) {
+        reminderSchedulerSynced_ = true;
+        reminderSchedulerRegistered_ = true;
+        reminderSchedulerStatus_.clear();
+    } else {
+        reminderSchedulerSynced_ = false;
+        reminderSchedulerStatus_ = error;
+    }
+}
+
+void MainWindow::StartReminderTimer() {
+    if (!hwnd_) return;
+    StopReminderTimer();
+    RefreshReminderSchedulerFallback();
+    if (!ui_.reminders.enabled) return;
+
+    ReminderMinute next;
+    const ReminderMinute now = CurrentReminderMinute();
+    const bool hasNextDue = reminders_.NextDue(now, next);
+    const UINT delay = static_cast<UINT>(
+        ComputeReminderTimerDelayMs(now, hasNextDue, next, kReminderCheckMaxMs));
+    SetTimer(hwnd_, kReminderTimerId, delay, nullptr);
+}
+
+void MainWindow::StopReminderTimer() {
+    if (hwnd_) KillTimer(hwnd_, kReminderTimerId);
+}
+
+void MainWindow::OnReminderTimer(bool catchUp) {
+    const ReminderMinute now = CurrentReminderMinute();
+    const std::vector<ReminderCandidate> due = catchUp ? reminders_.CatchUpDue(now)
+                                                       : reminders_.DueNow(now);
+    if (DispatchReminders(due)) {
+        const long long firedAt = NowEpochSeconds();
+        for (const ReminderCandidate& reminder : due)
+            reminders_.MarkFired(reminder, firedAt);
+        ScheduleSave();
+    }
+    StartReminderTimer();
+}
+
+bool MainWindow::DispatchReminders(const std::vector<ReminderCandidate>& due) {
+    if (due.empty()) return false;
+
+    const bool popupAccepted = ui_.reminders.inAppPopup &&
+        ReminderPopup::Show(hwnd_, due, lang_, theme_, d2dFactory_, dwrite_, WM_APP_REMINDER_OPEN);
+    const bool capsuleAccepted = ui_.reminders.capsulePulse && StartCapsuleReminderPulse(due);
+    const bool systemAccepted = ui_.reminders.systemNotification && ShowSystemReminder(due);
+
+    return DecideReminderDispatch({
+        ReminderChannelResult{ui_.reminders.inAppPopup, popupAccepted},
+        ReminderChannelResult{ui_.reminders.capsulePulse, capsuleAccepted},
+        ReminderChannelResult{ui_.reminders.systemNotification, systemAccepted},
+    }).markFired;
+}
+
+bool MainWindow::ShowSystemReminder(const std::vector<ReminderCandidate>& due) {
+    if (due.empty()) return false;
+    bool delivered = false;
+
+    const ReminderDisplayText text = FormatReminderText(due, lang_);
+    const std::wstring body = JoinReminderLines(text, 200);
+    if (text.title.empty() || body.empty()) return false;
+    lastSystemReminderBlockId_ = due.front().blockId;
+
+    if (!trayAdded_ && !AddTrayIcon()) {
+        reminderNotificationStatus_ = L"Could not add tray icon for notification";
+    } else {
+        delivered = WindowsNotifier::ShowTrayBalloon(nid_, text.title, body) || delivered;
+        if (!delivered) reminderNotificationStatus_ = L"Could not show tray notification";
+    }
+
+    std::wstring error;
+    if (!WindowsNotifier::EnsureToastShortcut(CurrentExePath(), &error)) {
+        reminderNotificationStatus_ = error;
+    } else if (WindowsNotifier::ShowToast(due.front().day, due.front().blockId,
+                                          text.title, body, &error)) {
+        delivered = true;
+        reminderNotificationStatus_.clear();
+    } else {
+        reminderNotificationStatus_ = error;
+    }
+
+    return delivered;
+}
+
+bool MainWindow::ShowBackgroundSystemReminder(const std::vector<ReminderCandidate>& due) {
+    if (due.empty()) return false;
+
+    const ReminderDisplayText text = FormatReminderText(due, lang_);
+    const std::wstring body = JoinReminderLines(text, 200);
+    if (text.title.empty() || body.empty()) return false;
+
+    std::wstring error;
+    if (!WindowsNotifier::EnsureToastShortcut(CurrentExePath(), &error)) {
+        reminderNotificationStatus_ = error;
+        return false;
+    }
+    if (!WindowsNotifier::ShowToast(due.front().day, due.front().blockId,
+                                    text.title, body, &error)) {
+        reminderNotificationStatus_ = error;
+        return false;
+    }
+    reminderNotificationStatus_.clear();
+    return true;
+}
+
+bool MainWindow::StartCapsuleReminderPulse(const std::vector<ReminderCandidate>& due) {
+    if (!CanStartCapsuleReminderPulse(!due.empty(), IsWindowVisible(hwnd_) != FALSE))
+        return false;
+    reminderVisual_.active = true;
+    reminderVisual_.blockId = due.front().blockId;
+    reminderVisual_.pendingCount = static_cast<int>(due.size());
+    reminderVisual_.untilEpoch = NowEpochSeconds() + 12;
+    reminderVisual_.pulseT = 1.0;
+    InvalidateRect(hwnd_, nullptr, FALSE);
+    return true;
+}
+
+void MainWindow::OpenReminderTarget(int blockId) {
+    const CalendarBlock* block = calendar_.FindBlock(blockId);
+    if (!block) return;
+
+    Show(true);
+    if (activeView_ != MainView::Calendar) SetActiveView(MainView::Calendar);
+    DrillToCalendarDay(block->day);
+    if (calendarMode() != CalendarViewMode::Day) SetCalendarMode(CalendarViewMode::Day);
+    calendarScroll_ = GuiCalendar::ScrollForMinute(block->startMinute, ViewportHeight(), calendarFrame_);
+    calendarScrollInitialized_ = true;
+    ClampCalendarScroll();
+    reminderVisual_.active = false;
+    reminderVisual_.blockId = blockId;
+    reminderVisual_.pendingCount = 0;
+    reminderVisual_.untilEpoch = NowEpochSeconds() + 10;
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void MainWindow::RunReminderCheckOnce(bool backgroundOnly) {
+    RefreshReminderSchedule();
+
+    const ReminderMinute now = CurrentReminderMinute();
+    const std::vector<ReminderCandidate> due = reminders_.ScheduledCheckDue(now);
+    const bool delivered = backgroundOnly
+        ? (!due.empty() && ui_.reminders.systemNotification && ShowBackgroundSystemReminder(due))
+        : DispatchReminders(due);
+    if (delivered) {
+        const long long firedAt = NowEpochSeconds();
+        for (const ReminderCandidate& reminder : due)
+            reminders_.MarkFired(reminder, firedAt);
+        SaveNow();
+    } else if (backgroundOnly && savePending_) {
+        SaveNow();
+    }
+    StartReminderTimer();
 }
 
 bool MainWindow::ChooseBackupDirectory(HWND owner, std::wstring& out) {
