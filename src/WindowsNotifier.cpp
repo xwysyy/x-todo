@@ -185,6 +185,7 @@ bool ShowToast(const std::string& day, int blockId, const std::wstring& title,
     using Microsoft::WRL::ComPtr;
     using Microsoft::WRL::Wrappers::HStringReference;
     using ABI::Windows::Data::Xml::Dom::IXmlDocument;
+    using ABI::Windows::Data::Xml::Dom::IXmlDocumentIO;
     using ABI::Windows::UI::Notifications::IToastNotification;
     using ABI::Windows::UI::Notifications::IToastNotificationFactory;
     using ABI::Windows::UI::Notifications::IToastNotificationManagerStatics;
@@ -211,10 +212,12 @@ bool ShowToast(const std::string& day, int blockId, const std::wstring& title,
 
     ComPtr<IXmlDocument> document;
     if (SUCCEEDED(hr)) hr = inspectable.As(&document);
+    ComPtr<IXmlDocumentIO> documentIo;
+    if (SUCCEEDED(hr)) hr = inspectable.As(&documentIo);
     const std::wstring xml = ToastXmlForBlock(day, blockId, title, body);
     if (SUCCEEDED(hr)) {
-        hr = document->LoadXml(HStringReference(xml.c_str(),
-                                                static_cast<UINT32>(xml.size())).Get());
+        hr = documentIo->LoadXml(HStringReference(xml.c_str(),
+                                                  static_cast<UINT32>(xml.size())).Get());
     }
 
     ComPtr<IToastNotificationFactory> factory;
